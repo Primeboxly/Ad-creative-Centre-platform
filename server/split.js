@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { db } from './db.js';
 import { CLIPS_DIR, RAW_DIR, MUSIC_DIR } from './paths.js';
-import { run, probe, thumbnail, thumbOf, extractAudio } from './video.js';
+import { run, probe, thumbnail, thumbOf, extractAudio, ffmpegError, X264 } from './video.js';
 
 export const HOOK = { min: 1.5, ideal: 3, max: 4 };  // seconds
 export const CTA = { min: 2, ideal: 3, max: 5 };
@@ -38,9 +38,9 @@ export function planCuts(d, scenes = []) {
 
 async function cut(src, start, end, hasAudio, out) {
   const r = await run(['-y', '-ss', start.toFixed(3), '-i', src, '-t', (end - start).toFixed(3),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    ...X264, '-crf', '20', '-pix_fmt', 'yuv420p',
     ...(hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']), '-movflags', '+faststart', out]);
-  if (r.code !== 0 || !existsSync(out)) throw new Error('ffmpeg failed: ' + r.err.trim().split('\n').slice(-2).join(' '));
+  if (r.code !== 0 || !existsSync(out)) throw new Error(ffmpegError(r));
 }
 
 // ---------- Queue: one raw video at a time, in the background ----------

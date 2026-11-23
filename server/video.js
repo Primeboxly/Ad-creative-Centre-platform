@@ -16,10 +16,24 @@ export function run(args) {
     const p = spawn(FFMPEG, ['-hide_banner', ...args], { windowsHide: true });
     let err = '';
     p.stderr.on('data', d => { err += d; if (err.length > 200e3) err = err.slice(-100e3); });
-    p.on('close', code => resolve({ code, err }));
+    p.on('close', (code, signal) => resolve({ code, signal, err }));
     p.on('error', e => resolve({ code: -1, err: String(e) }));
   });
 }
+
+// A short, useful reason for a failed ffmpeg run (its last lines are only progress counters).
+export function ffmpegError(r) {
+  console.error('ffmpeg', r.code, r.signal || '', '\n' + r.err.slice(-3000));
+  if (r.signal || r.code === 137 || r.code === null)
+    return `ffmpeg was stopped (${r.signal || r.code}): the server probably ran out of memory. Try again, or give the service more memory in Railway.`;
+  const lines = r.err.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    .filter(l => !/^(frame=|size=|video:|\[out#|Stream mapping|Press \[q\])/.test(l));
+  const bad = lines.filter(l => /error|invalid|no such|failed|cannot|unable|not found|unknown|does not|too many|killed|out of memory/i.test(l));
+  return 'ffmpeg failed: ' + (bad.length ? bad.slice(-3) : lines.slice(-2)).join(' | ').slice(0, 400);
+}
+
+// Fewer threads and a short look-ahead keep memory low on small servers (Railway's free plan).
+export const X264 = ['-c:v', 'libx264', '-preset', 'veryfast', '-threads', '2', '-x264-params', 'rc-lookahead=10:ref=2'];
 
 // Duration (seconds), whether it has sound, and whether it is a video at all.
 export async function probe(file) {
@@ -156,7 +170,7 @@ export function adArgs(parts, out, opts = {}) {
     f.push('[voice][mus]amix=inputs=2:duration=first:normalize=0[a]');
   }
   args.push('-filter_complex', f.join(';'), '-map', '[v]', '-map', '[a]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out);
+    ...X264, '-crf', '23', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', out);
   return args;
 }
 
@@ -198,7 +212,7 @@ async function next() {
     mkdirSync(workDir, { recursive: true });
     const name = `creative-${c.id}.mp4`, out = join(RENDERS_DIR, name);
     const r = await run(adArgs(parts, out, { music: music ? join(MUSIC_DIR, music.file) : null, clipSound: !!c.clip_sound && !music, workDir }));
-    if (r.code !== 0 || !existsSync(out)) throw new Error('ffmpeg failed: ' + r.err.trim().split('\n').slice(-3).join(' '));
+    if (r.code !== 0 || !existsSync(out)) throw new Error(ffmpegError(r));
     await thumbnail(out, thumbOf('creative', c.id));
     const total = parts.reduce((s, p) => s + p.seg, 0);
     db.prepare(`UPDATE creatives SET render = 'ready', file = ?, duration = ? WHERE id = ?`).run(name, total, c.id);

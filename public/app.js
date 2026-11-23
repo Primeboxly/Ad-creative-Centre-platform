@@ -479,7 +479,7 @@ function renderCreatives() {
         const s = scripts.find(x => x.id === c.script_id);
         const media = c.render === 'ready'
           ? `<video src="/media/creative/${c.id}" poster="/media/thumb/creative/${c.id}" controls preload="none" playsinline></video>`
-          : c.render === 'failed' ? `<div style="padding:14px;text-align:center"><div style="color:#ff8a7a">Failed</div><div class="small" style="margin:6px 0">${esc(c.error).slice(0, 160)}</div><button class="btn sm" data-retry>Try again</button></div>`
+          : c.render === 'failed' ? `<div style="padding:14px;text-align:center"><div style="color:#ff8a7a">Failed</div><div class="small" style="margin:6px 0">${esc(c.error).slice(0, 320)}</div><button class="btn sm" data-retry>Try again</button></div>`
           : `<div style="text-align:center"><div class="spin" style="margin:0 auto 8px"></div>${c.render === 'rendering' ? 'Making video…' : 'Waiting…'}</div>`;
         return `<div class="card creative" data-id="${c.id}">
           <div class="media">${media}</div>

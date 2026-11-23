@@ -78,6 +78,18 @@ test("clip's own sound kept quietly under the voice", async () => {
   assert.ok(Math.abs((await probe(out)).duration - 5.4) < 0.3);
 });
 
+test('ffmpeg errors are reported by their real cause', async () => {
+  const { ffmpegError } = await import('../server/video.js');
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.match(ffmpegError({ code: null, signal: 'SIGKILL', err: 'frame= 1 fps=0.0' }), /ran out of memory/);
+    const msg = ffmpegError({ code: 1, err: '[Parsed_drawtext_3] Cannot find a valid font\nError initializing filter\nframe= 1 fps=0.0 q=0.0 size= 0kB' });
+    assert.match(msg, /Cannot find a valid font/);
+    assert.doesNotMatch(msg, /frame=/);
+  } finally { console.error = quiet; }
+});
+
 test('captions are split in short groups that cover the time', async () => {
   const { chunkCaptions, plain } = await import('../server/video.js');
   const c = chunkCaptions('Bado unapima vyumba kwa utepe? Kipimo kimoja kibaya ✅', 0, 6);
