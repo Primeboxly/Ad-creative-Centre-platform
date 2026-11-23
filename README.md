@@ -29,7 +29,7 @@ Without a key everything works except the **Generate** button (scripts can still
 | Product → Scripts | **Generate** scripts with AI (language, how many, extra instructions) or add one by hand. Copy button for the editor / voice-over |
 | Product → Creatives | The finished videos: play, rename, download, mark **Draft / Testing / Winner / Loser**, filter by status |
 | Build bar (Footage) | Choose a **script** (one, or all scripts of a language: each is read over every clip combination), an ElevenLabs **voice**, **music** (none, one track, or a random track per video) and **captions**. With a voice, each part lasts as long as its words (the clip loops if needed) and the clips own sound is left out |
-| Music | Shared music library: upload, listen, rename, delete. Under a voice the music plays at 13 %, under clip sound at 35 % |
+| Music | Shared music library: upload music, or a video to keep only its sound; listen, rename, delete. Auto-split adds each video's own sound here by itself (🎬). In the Build bar, **🎬 Music of the TikTok video** gives every ad the sound of the video its body clip (else hook, else CTA) was cut from; clips without a saved sound keep their own sound quietly under the voice. Under a voice the music plays at 13 %, under clip sound at 35 % |
 | Team (admin) | Add members, change role, reset password, disable an account |
 
 The **notes** under the product name (benefits, who buys it, price, offer) are what the AI works from: fill them in before generating. The line under them is the **CTA banner** written on top of the CTA part (empty = "PAY ON DELIVERY" in the script language).

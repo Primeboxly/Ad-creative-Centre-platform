@@ -105,6 +105,9 @@ addColumn('creatives', 'voice_id', "TEXT NOT NULL DEFAULT ''");    // ElevenLabs
 addColumn('creatives', 'voice_name', "TEXT NOT NULL DEFAULT ''");
 addColumn('creatives', 'music_id', 'INTEGER REFERENCES music(id) ON DELETE SET NULL');
 addColumn('creatives', 'captions', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('music', 'from_video', "TEXT NOT NULL DEFAULT ''");      // the video this sound was taken from ('' = uploaded music)
+addColumn('clips', 'music_id', 'INTEGER REFERENCES music(id) ON DELETE SET NULL'); // sound of the video the clip was cut from
+addColumn('creatives', 'clip_sound', 'INTEGER NOT NULL DEFAULT 0'); // keep the clips' own sound under the voice
 
 export function tx(fn) {
   db.exec('BEGIN');

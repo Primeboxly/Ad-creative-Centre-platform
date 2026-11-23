@@ -302,7 +302,7 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = ()
 }
 
 // Build options are remembered in this browser.
-const build = Object.assign({ script: '', voice: '', music: 'none', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+const build = Object.assign({ script: '', voice: '', music: 'video', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
 const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
 
 // Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
@@ -346,6 +346,7 @@ function renderBuildBar() {
       ${voices.map(v => `<option value="${esc(v.id)}" ${build.voice === v.id ? 'selected' : ''}>${esc(v.name)}${v.info ? ` · ${esc(v.info)}` : ''}</option>`).join('')}
     </select></label>
     <label class="bbf">🎵 <select id="bbMusic">
+      <option value="video" ${build.music === 'video' ? 'selected' : ''}>🎬 Music of the TikTok video</option>
       <option value="none" ${build.music === 'none' ? 'selected' : ''}>No music</option>
       <option value="random" ${build.music === 'random' ? 'selected' : ''} ${tracks.length ? '' : 'disabled'}>Random track (${tracks.length})</option>
       ${tracks.map(m => `<option value="${m.id}" ${build.music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
@@ -529,9 +530,9 @@ async function renderMusic() {
     <h1>Music</h1>
     <p class="muted">Tracks for the background of the ads, shared by all products. Use music you are allowed to use in ads
       (Meta Sound Collection, Pixabay Music, YouTube Audio Library…): TikTok trending sounds get ads muted or rejected.
-      Under a voice-over the music plays quietly.</p>
+      Under a voice-over the music plays quietly. Videos cut with Auto-split add their own sound here by themselves (🎬).</p>
     <div class="card">
-      <div class="drop" id="musicDrop">⬆ Drop music here or click to upload (mp3, m4a, wav… up to 50 MB)<input type="file" accept="audio/*" multiple class="hidden"></div>
+      <div class="drop" id="musicDrop">⬆ Drop music, or a video to take its sound (mp3, m4a, wav, mp4…)<input type="file" accept="audio/*,video/*" multiple class="hidden"></div>
       <div class="progress hidden"><div></div></div>
     </div>
     <div class="card" style="margin-top:14px">

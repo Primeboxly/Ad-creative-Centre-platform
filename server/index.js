@@ -7,7 +7,7 @@ import { db, tx } from './db.js';
 import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR, MUSIC_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
-import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady } from './video.js';
+import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady, extractAudio } from './video.js';
 import { ttsReady, listVoices } from './tts.js';
 import { writeScripts, LANGUAGES, aiReady } from './ai.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
@@ -325,14 +325,17 @@ app.post('/api/products/:id/creatives', (req, res) => {
   if (voiceId && !scriptIds.length) throw new HttpError(400, 'Choose a script for the voice to read');
   if (voiceId && !ttsReady()) throw new HttpError(503, 'Voice-over is not set up: add ELEVENLABS_API_KEY to the server settings.');
   const captions = req.body?.captions && scriptIds.length ? 1 : 0;
-  // Music: 'none', 'random' (a different track per video) or one track id.
+  // Music: 'none', 'video' (the sound of the TikTok the body/hook clip came from), 'random' (a different track
+  // per video) or one track id.
   const tracks = db.prepare(`SELECT id FROM music`).all().map(m => m.id);
   const musicChoice = String(req.body?.music ?? 'none');
-  if (musicChoice !== 'none' && musicChoice !== 'random' && !tracks.includes(Number(musicChoice))) throw new HttpError(400, 'Unknown music track');
+  if (!['none', 'random', 'video'].includes(musicChoice) && !tracks.includes(Number(musicChoice))) throw new HttpError(400, 'Unknown music track');
   if (musicChoice === 'random' && !tracks.length) throw new HttpError(400, 'The music library is empty: add tracks in Music first');
+  const clipMusic = id => (id ? db.prepare(`SELECT music_id FROM clips WHERE id = ?`).get(id)?.music_id : null) || null;
   let shuffle = [];
-  const musicFor = () => {
+  const musicFor = (hk, b, c) => {
     if (musicChoice === 'none') return null;
+    if (musicChoice === 'video') return clipMusic(b) || clipMusic(hk) || clipMusic(c);
     if (musicChoice !== 'random') return Number(musicChoice);
     if (!shuffle.length) shuffle = [...tracks].sort(() => Math.random() - 0.5);
     return shuffle.pop();
@@ -344,9 +347,13 @@ app.post('/api/products/:id/creatives', (req, res) => {
   if (combos.length > MAX_COMBOS) throw new HttpError(400, `${combos.length} videos is too many at once (max ${MAX_COMBOS})`);
   const ids = tx(() => combos.map(([hk, b, c, sid]) => {
     const name = [hk && `H${hk}`, b && `B${b}`, c && `C${c}`, sid && `S${sid}`].filter(Boolean).join(' + ');
-    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id, captions)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', musicFor(), captions).lastInsertRowid;
+    const music = musicFor(hk, b, c);
+    // 'video' but the clips came without a saved sound (cut before this existed, or put straight in a lane):
+    // keep the clips' own sound quietly under the voice instead.
+    const clipSound = musicChoice === 'video' && !music ? 1 : 0;
+    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id, captions, clip_sound)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', music, captions, clipSound).lastInsertRowid;
   }));
   queueRenders();
   res.status(201).json({ ids });
@@ -384,11 +391,12 @@ app.delete('/api/creatives/:id', (req, res) => {
 });
 
 // ---------- Music library (shared by all products) ----------
+// Music files, or videos (their sound is taken as the track: e.g. the TikTok whose music you want).
 const AUDIO_EXT = ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.opus', '.flac'];
 const audioUpload = multer({
   dest: TMP_DIR,
-  limits: { fileSize: 50 * 1024 * 1024, files: 30 },
-  fileFilter: (req, file, cb) => cb(null, AUDIO_EXT.includes(extname(file.originalname).toLowerCase())),
+  limits: { fileSize: 300 * 1024 * 1024, files: 30 },
+  fileFilter: (req, file, cb) => cb(null, [...AUDIO_EXT, ...VIDEO_EXT].includes(extname(file.originalname).toLowerCase())),
 });
 
 app.get('/api/music', (req, res) => {
@@ -398,15 +406,22 @@ app.get('/api/music', (req, res) => {
 app.post('/api/music', audioUpload.array('files'), async (req, res) => {
   const files = req.files || [];
   try {
-    if (!files.length) throw new HttpError(400, `No music received (accepted: ${AUDIO_EXT.join(' ')})`);
+    if (!files.length) throw new HttpError(400, `No music received (accepted: ${[...AUDIO_EXT, ...VIDEO_EXT].join(' ')})`);
     const added = [], skipped = [];
     for (const f of files) {
       const info = await probe(f.path);
       if (!info.hasAudio || info.duration <= 0) { skipped.push(f.originalname); continue; }
-      const name = `music-${randomBytes(8).toString('hex')}${extname(f.originalname).toLowerCase()}`;
-      renameSync(f.path, join(MUSIC_DIR, name));
-      db.prepare(`INSERT INTO music (name, file, duration, uploaded_by) VALUES (?,?,?,?)`)
-        .run(f.originalname.replace(/.[^.]+$/, '').slice(0, 100), name, info.duration, req.user.id);
+      const base = f.originalname.replace(/\.[^.]+$/, '').slice(0, 100);
+      let name;
+      if (info.hasVideo) { // a video: keep only its sound
+        name = `music-${randomBytes(8).toString('hex')}.m4a`;
+        await extractAudio(f.path, join(MUSIC_DIR, name));
+      } else {
+        name = `music-${randomBytes(8).toString('hex')}${extname(f.originalname).toLowerCase()}`;
+        renameSync(f.path, join(MUSIC_DIR, name));
+      }
+      db.prepare(`INSERT INTO music (name, file, duration, uploaded_by, from_video) VALUES (?,?,?,?,?)`)
+        .run(info.hasVideo ? `🎬 ${base}` : base, name, info.duration, req.user.id, info.hasVideo ? f.originalname.slice(0, 200) : '');
       added.push(name);
     }
     res.status(201).json({ added: added.length, skipped });

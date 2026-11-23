@@ -39,6 +39,12 @@ export async function thumbnail(input, out) {
 
 export const thumbOf = (type, id) => join(THUMBS_DIR, `${type}-${id}.jpg`);
 
+// The sound track of a video, as an AAC file (used as music).
+export async function extractAudio(src, out) {
+  const r = await run(['-y', '-i', src, '-vn', '-c:a', 'aac', '-b:a', '160k', out]);
+  if (r.code !== 0 || !existsSync(out)) throw new Error('Could not take the sound: ' + r.err.trim().split('\n').slice(-1)[0]);
+}
+
 // ---------- Captions ----------
 // A font that exists here: ACC_FONT, the Docker one (fonts-dejavu-core), or a Windows one.
 const FONT = [process.env.ACC_FONT, '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -105,7 +111,7 @@ function overlays(part, workDir, tag) {
 // parts: [{ file, duration, hasAudio, seg, vo, captions, banner }]
 //   seg = how long the part lasts in the ad (the clip loops when the voice is longer than the clip)
 //   vo  = voice-over MP3 of this part. When any part has a voice, clips' own sound is left out.
-// opts:  { music: file|null, workDir }
+// opts:  { music: file|null, clipSound: bool, workDir }
 // Every part is fitted into 1080x1920 (black bars if needed) at 30 fps.
 export function adArgs(parts, out, opts = {}) {
   const args = ['-y'];
@@ -128,10 +134,18 @@ export function adArgs(parts, out, opts = {}) {
     const d = p.seg.toFixed(3);
     f.push(`[${vIn[i]}:v]trim=0:${d},setpts=PTS-STARTPTS,scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,` +
       `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p${overlays(p, opts.workDir, 'p' + i)}[v${i}]`);
+    // opts.clipSound: keep each clip's own sound quietly under the voice (its "music" when there is no track).
+    const under = p.vo && opts.clipSound && p.hasAudio;
     const src = p.vo ? `[${voIn[i]}:a]${fmt},adelay=150|150`
       : !anyVoice && p.hasAudio ? `[${vIn[i]}:a]${fmt}`
       : `anullsrc=r=44100:cl=stereo,${fmt}`;
-    f.push(`${src},apad,atrim=0:${d},asetpts=PTS-STARTPTS[a${i}]`);
+    if (under) {
+      f.push(`${src},apad,atrim=0:${d},asetpts=PTS-STARTPTS[vo${i}]`);
+      f.push(`[${vIn[i]}:a]${fmt},volume=0.2,apad,atrim=0:${d},asetpts=PTS-STARTPTS[bg${i}]`);
+      f.push(`[vo${i}][bg${i}]amix=inputs=2:duration=first:normalize=0[a${i}]`);
+    } else {
+      f.push(`${src},apad,atrim=0:${d},asetpts=PTS-STARTPTS[a${i}]`);
+    }
   });
   f.push(parts.map((_, i) => `[v${i}]`).join('') + `concat=n=${parts.length}:v=1:a=0[v]`);
   f.push(parts.map((_, i) => `[a${i}]`).join('') + `concat=n=${parts.length}:v=0:a=1${musicIn !== null ? '[voice]' : '[a]'}`);
@@ -183,7 +197,7 @@ async function next() {
     const music = c.music_id ? db.prepare(`SELECT file FROM music WHERE id = ?`).get(c.music_id) : null;
     mkdirSync(workDir, { recursive: true });
     const name = `creative-${c.id}.mp4`, out = join(RENDERS_DIR, name);
-    const r = await run(adArgs(parts, out, { music: music ? join(MUSIC_DIR, music.file) : null, workDir }));
+    const r = await run(adArgs(parts, out, { music: music ? join(MUSIC_DIR, music.file) : null, clipSound: !!c.clip_sound && !music, workDir }));
     if (r.code !== 0 || !existsSync(out)) throw new Error('ffmpeg failed: ' + r.err.trim().split('\n').slice(-3).join(' '));
     await thumbnail(out, thumbOf('creative', c.id));
     const total = parts.reduce((s, p) => s + p.seg, 0);

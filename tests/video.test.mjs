@@ -66,6 +66,18 @@ test('voice-over, looped clip, captions, CTA banner and music', async () => {
   assert.ok(captionsReady(), 'no font found for captions');
 });
 
+test("clip's own sound kept quietly under the voice", async () => {
+  const { adArgs } = await import('../server/video.js');
+  const vo = join(dir, 'vo3.mp3');
+  assert.equal(spawnSync(ffmpeg, ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=3', vo]).status, 0);
+  const parts = [{ file: make('s1.mp4', '720x1280', 2, true), duration: 2, hasAudio: true, seg: 3.4, vo },
+    { file: make('s2.mp4', '720x1280', 2, false), duration: 2, hasAudio: false, seg: 2 }];
+  const out = join(dir, 'under.mp4');
+  const r = spawnSync(ffmpeg, ['-hide_banner', ...adArgs(parts, out, { clipSound: true })], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr.slice(-800));
+  assert.ok(Math.abs((await probe(out)).duration - 5.4) < 0.3);
+});
+
 test('captions are split in short groups that cover the time', async () => {
   const { chunkCaptions, plain } = await import('../server/video.js');
   const c = chunkCaptions('Bado unapima vyumba kwa utepe? Kipimo kimoja kibaya ✅', 0, 6);

@@ -4,8 +4,8 @@ import { join, extname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { db } from './db.js';
-import { CLIPS_DIR, RAW_DIR } from './paths.js';
-import { run, probe, thumbnail, thumbOf } from './video.js';
+import { CLIPS_DIR, RAW_DIR, MUSIC_DIR } from './paths.js';
+import { run, probe, thumbnail, thumbOf, extractAudio } from './video.js';
 
 export const HOOK = { min: 1.5, ideal: 3, max: 4 };  // seconds
 export const CTA = { min: 2, ideal: 3, max: 5 };
@@ -54,17 +54,26 @@ async function next() {
   db.prepare(`UPDATE raws SET status = 'splitting', error = '' WHERE id = ?`).run(raw.id);
   const src = join(RAW_DIR, raw.file);
   const made = [], ids = [];
+  let music = null;
   try {
     const info = await probe(src);
     if (!info.hasVideo || !(info.duration > 0)) throw new Error('Not a readable video');
     const parts = planCuts(info.duration, await sceneChanges(src));
     const base = raw.original_name.replace(/\.[^.]+$/, '').slice(0, 60);
+    // Its sound goes to the music library, so ads can use "the music of the video".
+    let musicId = null;
+    if (info.hasAudio) {
+      music = `music-${randomBytes(8).toString('hex')}.m4a`;
+      await extractAudio(src, join(MUSIC_DIR, music));
+      musicId = db.prepare(`INSERT INTO music (name, file, duration, uploaded_by, from_video) VALUES (?,?,?,?,?)`)
+        .run(`🎬 ${base}`, music, info.duration, raw.uploaded_by, raw.original_name).lastInsertRowid;
+    }
     for (const p of parts) {
       const name = `p${raw.product_id}-${randomBytes(8).toString('hex')}.mp4`;
       await cut(src, p.start, p.end, info.hasAudio, join(CLIPS_DIR, name));
       made.push(name);
-      const id = db.prepare(`INSERT INTO clips (product_id, kind, file, original_name, label, duration, has_audio, uploaded_by) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(raw.product_id, p.kind, name, raw.original_name, `${base} · ${p.kind}`, p.end - p.start, info.hasAudio ? 1 : 0, raw.uploaded_by).lastInsertRowid;
+      const id = db.prepare(`INSERT INTO clips (product_id, kind, file, original_name, label, duration, has_audio, uploaded_by, music_id) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(raw.product_id, p.kind, name, raw.original_name, `${base} · ${p.kind}`, p.end - p.start, info.hasAudio ? 1 : 0, raw.uploaded_by, musicId).lastInsertRowid;
       ids.push(id);
       await thumbnail(join(CLIPS_DIR, name), thumbOf('clip', id));
     }
@@ -75,6 +84,7 @@ async function next() {
     // Undo the parts already made, so a retry does not give duplicates.
     for (const id of ids) { db.prepare(`DELETE FROM clips WHERE id = ?`).run(id); rmSync(thumbOf('clip', id), { force: true }); }
     for (const f of made) rmSync(join(CLIPS_DIR, f), { force: true });
+    if (music) { db.prepare(`DELETE FROM music WHERE file = ?`).run(music); rmSync(join(MUSIC_DIR, music), { force: true }); }
     db.prepare(`UPDATE raws SET status = 'failed', error = ? WHERE id = ?`).run(e.message.slice(0, 500), raw.id);
   }
   next();
