@@ -2,8 +2,8 @@
 FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production
-# Video assembly uses Debian's ffmpeg (does not depend on ffmpeg-static downloading its binary during the build).
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# Video assembly uses Debian's ffmpeg (and DejaVu Bold for captions) (does not depend on ffmpeg-static downloading its binary during the build).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts

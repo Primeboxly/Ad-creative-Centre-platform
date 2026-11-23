@@ -70,6 +70,7 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4
 .tabs a { padding: 9px 14px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--muted); text-decoration: none; }
 .tabs a.on { color: var(--ink); border-color: var(--accent); font-weight: 600; }
 .notes { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-top: 10px; }
+.t td input[type=text] { padding: 5px 8px; }
 
 .lanes { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } }
@@ -97,6 +98,9 @@ label.f { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4
 .buildbar select { width: auto; max-width: 340px; }
 .buildbar .formula { font-size: 15px; }
 .buildbar .formula b { color: #ffb4a6; }
+.buildbar .bbf { display: flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.buildbar .bbf select { max-width: 230px; padding: 6px 8px; font-size: 13px; }
+.buildbar .bbf select:disabled { opacity: .5; }
 
 .scripts { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
 .script .part { margin-top: 8px; }

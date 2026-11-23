@@ -9,8 +9,11 @@ export const DATA_DIR = resolve(process.env.ACC_DATA || process.env.RAILWAY_VOLU
 export const DB_FILE = join(DATA_DIR, 'acc.db');
 export const CLIPS_DIR = join(DATA_DIR, 'clips');       // uploaded footage
 export const RAW_DIR = join(DATA_DIR, 'raw');           // full videos waiting to be auto-split
+export const VOICE_DIR = join(DATA_DIR, 'voice');       // voice-overs made by ElevenLabs (cached by text + voice)
+export const MUSIC_DIR = join(DATA_DIR, 'music');       // music library
+export const WORK_DIR = join(DATA_DIR, 'work');         // caption files while a video is made
 export const RENDERS_DIR = join(DATA_DIR, 'renders');   // finished ad videos
 export const THUMBS_DIR = join(DATA_DIR, 'thumbs');     // one picture per clip / creative
 export const TMP_DIR = join(DATA_DIR, 'tmp');           // uploads in progress
 
-for (const d of [DATA_DIR, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR]) mkdirSync(d, { recursive: true });
+for (const d of [DATA_DIR, CLIPS_DIR, RAW_DIR, VOICE_DIR, MUSIC_DIR, WORK_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR]) mkdirSync(d, { recursive: true });

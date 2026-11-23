@@ -4,10 +4,11 @@ import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, existsSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { db, tx } from './db.js';
-import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR } from './paths.js';
+import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR, MUSIC_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
-import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile } from './video.js';
+import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady } from './video.js';
+import { ttsReady, listVoices } from './tts.js';
 import { writeScripts, LANGUAGES, aiReady } from './ai.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
 
@@ -78,7 +79,10 @@ app.post('/api/auth/logout', (req, res) => {
   res.clearCookie('sid').json({ ok: true });
 });
 
-app.get('/api/me', (req, res) => res.json({ user: req.user, languages: LANGUAGES, ai: aiReady(), statuses: STATUSES }));
+app.get('/api/me', (req, res) => res.json({ user: req.user, languages: LANGUAGES, ai: aiReady(), tts: ttsReady(), captions: captionsReady(), statuses: STATUSES }));
+
+// ElevenLabs voices of the account (for the Build bar).
+app.get('/api/voices', async (req, res) => res.json(await listVoices()));
 
 // ---------- Team (admin) ----------
 app.get('/api/users', requireAdmin, (req, res) => {
@@ -160,7 +164,8 @@ app.patch('/api/products/:id', (req, res) => {
   const name = req.body?.name !== undefined ? str(req.body.name, 200) : p.name;
   if (!name) throw new HttpError(400, 'Product name is required');
   const notes = req.body?.notes !== undefined ? str(req.body.notes, 4000) : p.notes;
-  db.prepare(`UPDATE products SET name = ?, notes = ? WHERE id = ?`).run(name, notes, p.id);
+  const banner = req.body?.banner !== undefined ? str(req.body.banner, 60) : p.banner;
+  db.prepare(`UPDATE products SET name = ?, notes = ?, banner = ? WHERE id = ?`).run(name, notes, banner, p.id);
   res.json({ ok: true });
 });
 
@@ -312,16 +317,36 @@ app.post('/api/products/:id/creatives', (req, res) => {
     return ids.length ? ids : [null];
   };
   const hooks = pick(req.body?.hooks, 'hook'), bodies = pick(req.body?.bodies, 'body'), ctas = pick(req.body?.ctas, 'cta');
-  const scriptId = req.body?.script_id ? Number(req.body.script_id) : null;
-  if (scriptId && !db.prepare(`SELECT 1 FROM scripts WHERE id = ? AND product_id = ?`).get(scriptId, p.id)) throw new HttpError(400, 'Unknown script');
+  // Scripts: each chosen script is read over every clip combination (none = clips only).
+  const rawScripts = Array.isArray(req.body?.script_ids) ? req.body.script_ids : req.body?.script_id ? [req.body.script_id] : [];
+  const scriptIds = [...new Set(rawScripts.map(Number).filter(Boolean))];
+  for (const sid of scriptIds) if (!db.prepare(`SELECT 1 FROM scripts WHERE id = ? AND product_id = ?`).get(sid, p.id)) throw new HttpError(400, 'Unknown script');
+  const voiceId = str(req.body?.voice_id, 100), voiceName = str(req.body?.voice_name, 100);
+  if (voiceId && !scriptIds.length) throw new HttpError(400, 'Choose a script for the voice to read');
+  if (voiceId && !ttsReady()) throw new HttpError(503, 'Voice-over is not set up: add ELEVENLABS_API_KEY to the server settings.');
+  const captions = req.body?.captions && scriptIds.length ? 1 : 0;
+  // Music: 'none', 'random' (a different track per video) or one track id.
+  const tracks = db.prepare(`SELECT id FROM music`).all().map(m => m.id);
+  const musicChoice = String(req.body?.music ?? 'none');
+  if (musicChoice !== 'none' && musicChoice !== 'random' && !tracks.includes(Number(musicChoice))) throw new HttpError(400, 'Unknown music track');
+  if (musicChoice === 'random' && !tracks.length) throw new HttpError(400, 'The music library is empty: add tracks in Music first');
+  let shuffle = [];
+  const musicFor = () => {
+    if (musicChoice === 'none') return null;
+    if (musicChoice !== 'random') return Number(musicChoice);
+    if (!shuffle.length) shuffle = [...tracks].sort(() => Math.random() - 0.5);
+    return shuffle.pop();
+  };
   const combos = [];
-  for (const hk of hooks) for (const b of bodies) for (const c of ctas) if (hk || b || c) combos.push([hk, b, c]);
+  for (const hk of hooks) for (const b of bodies) for (const c of ctas) if (hk || b || c)
+    for (const sid of scriptIds.length ? scriptIds : [null]) combos.push([hk, b, c, sid]);
   if (!combos.length) throw new HttpError(400, 'Pick at least one clip');
   if (combos.length > MAX_COMBOS) throw new HttpError(400, `${combos.length} videos is too many at once (max ${MAX_COMBOS})`);
-  const ids = tx(() => combos.map(([hk, b, c]) => {
-    const name = [hk && `H${hk}`, b && `B${b}`, c && `C${c}`].filter(Boolean).join(' + ');
-    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by) VALUES (?,?,?,?,?,?,?)`)
-      .run(p.id, hk, b, c, scriptId, name, req.user.id).lastInsertRowid;
+  const ids = tx(() => combos.map(([hk, b, c, sid]) => {
+    const name = [hk && `H${hk}`, b && `B${b}`, c && `C${c}`, sid && `S${sid}`].filter(Boolean).join(' + ');
+    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id, captions)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', musicFor(), captions).lastInsertRowid;
   }));
   queueRenders();
   res.status(201).json({ ids });
@@ -358,7 +383,60 @@ app.delete('/api/creatives/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Music library (shared by all products) ----------
+const AUDIO_EXT = ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.opus', '.flac'];
+const audioUpload = multer({
+  dest: TMP_DIR,
+  limits: { fileSize: 50 * 1024 * 1024, files: 30 },
+  fileFilter: (req, file, cb) => cb(null, AUDIO_EXT.includes(extname(file.originalname).toLowerCase())),
+});
+
+app.get('/api/music', (req, res) => {
+  res.json(db.prepare(`SELECT m.*, u.name uploader, (SELECT COUNT(*) FROM creatives WHERE music_id = m.id) used FROM music m LEFT JOIN users u ON u.id = m.uploaded_by ORDER BY m.id DESC`).all());
+});
+
+app.post('/api/music', audioUpload.array('files'), async (req, res) => {
+  const files = req.files || [];
+  try {
+    if (!files.length) throw new HttpError(400, `No music received (accepted: ${AUDIO_EXT.join(' ')})`);
+    const added = [], skipped = [];
+    for (const f of files) {
+      const info = await probe(f.path);
+      if (!info.hasAudio || info.duration <= 0) { skipped.push(f.originalname); continue; }
+      const name = `music-${randomBytes(8).toString('hex')}${extname(f.originalname).toLowerCase()}`;
+      renameSync(f.path, join(MUSIC_DIR, name));
+      db.prepare(`INSERT INTO music (name, file, duration, uploaded_by) VALUES (?,?,?,?)`)
+        .run(f.originalname.replace(/.[^.]+$/, '').slice(0, 100), name, info.duration, req.user.id);
+      added.push(name);
+    }
+    res.status(201).json({ added: added.length, skipped });
+  } finally { files.forEach(f => rmSync(f.path, { force: true })); }
+});
+
+app.patch('/api/music/:id', (req, res) => {
+  const name = str(req.body?.name, 100);
+  if (!name) throw new HttpError(400, 'Name is required');
+  const r = db.prepare(`UPDATE music SET name = ? WHERE id = ?`).run(name, idParam(req.params.id));
+  if (!r.changes) throw new HttpError(404, 'Track not found');
+  res.json({ ok: true });
+});
+
+app.delete('/api/music/:id', (req, res) => {
+  const m = db.prepare(`SELECT * FROM music WHERE id = ?`).get(idParam(req.params.id));
+  if (!m) throw new HttpError(404, 'Track not found');
+  if (db.prepare(`SELECT 1 FROM creatives WHERE music_id = ? AND render IN ('queued','rendering')`).get(m.id))
+    throw new HttpError(409, 'Videos waiting to be made use this track. Try again when they are done.');
+  db.prepare(`DELETE FROM music WHERE id = ?`).run(m.id);
+  removeFile(MUSIC_DIR, m.file);
+  res.json({ ok: true });
+});
+
 // ---------- Media (signed-in users only) ----------
+app.get('/media/music/:id', (req, res) => {
+  const m = db.prepare(`SELECT file FROM music WHERE id = ?`).get(idParam(req.params.id));
+  if (!m) throw new HttpError(404, 'Track not found');
+  res.sendFile(join(MUSIC_DIR, m.file));
+});
 app.get('/media/clip/:id', (req, res) => {
   const c = clipOr404(idParam(req.params.id));
   res.sendFile(join(CLIPS_DIR, c.file));

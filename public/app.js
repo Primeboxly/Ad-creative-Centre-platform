@@ -77,7 +77,9 @@ function route() {
   $('#buildbar').classList.add('hidden');
   const [view, id, tab] = (location.hash.slice(1) || 'products').split('/');
   document.querySelectorAll('header nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
+  state.music = null; // reload the music list for the Build bar
   if (view === 'team' && ME.user.role === 'admin') return renderTeam();
+  if (view === 'music') return renderMusic();
   if (view === 'product' && id) { state.tab = tab || 'footage'; return renderProduct(Number(id)); }
   renderProducts();
 }
@@ -145,8 +147,12 @@ async function renderProduct(id) {
       ${ME.user.role === 'admin' ? '<button class="btn sm danger" id="delProduct">Delete product</button>' : ''}
     </div>
     <div class="notes">
-      <textarea id="notes" placeholder="Notes for the AI: benefits, who buys it, price, offer…">${esc(p.notes)}</textarea>
-      <button class="btn" id="saveNotes">Save notes</button>
+      <div>
+        <textarea id="notes" placeholder="Notes for the AI: benefits, who buys it, price, offer…">${esc(p.notes)}</textarea>
+        <input type="text" id="banner" maxlength="60" value="${esc(p.banner || '')}" style="margin-top:6px"
+          placeholder="CTA banner on the video, e.g. PAY ON DELIVERY · 680 ZMW (empty = 'Pay on delivery' in the script's language)">
+      </div>
+      <button class="btn" id="saveNotes">Save</button>
     </div>
     <div class="tabs">
       <a data-tab="footage">Footage (${clips.length})</a>
@@ -159,7 +165,7 @@ async function renderProduct(id) {
     a.onclick = () => { location.hash = `product/${id}/${a.dataset.tab}`; };
   });
   $('#saveNotes').onclick = async () => {
-    try { await api(`/api/products/${id}`, { method: 'PATCH', body: { notes: $('#notes').value } }); toast('Notes saved'); } catch (e) { fail(e); }
+    try { await api(`/api/products/${id}`, { method: 'PATCH', body: { notes: $('#notes').value, banner: $('#banner').value } }); toast('Saved'); } catch (e) { fail(e); }
   };
   const del = $('#delProduct');
   if (del) del.onclick = async () => {
@@ -275,7 +281,7 @@ function uploadClips(kind, files, drop) {
     r => `${r.added} clip(s) added${r.skipped?.length ? ` · not a video: ${r.skipped.join(', ')}` : ''}`, r => !!r.skipped?.length);
 }
 
-function upload(url, fields, files, drop, okMsg, isWarn = () => false) {
+function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = () => renderProduct(state.product)) {
   if (!files?.length) return;
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
@@ -289,33 +295,77 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false) {
     const r = JSON.parse(xhr.responseText || '{}');
     if (xhr.status >= 300) return fail(new Error(r.error || 'Upload failed')), bar.classList.add('hidden');
     toast(okMsg(r), isWarn(r));
-    renderProduct(state.product);
+    done();
   };
   xhr.onerror = () => { fail(new Error('Upload failed: check your connection')); bar.classList.add('hidden'); };
   xhr.send(fd);
 }
 
+// Build options are remembered in this browser.
+const build = Object.assign({ script: '', voice: '', music: 'none', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
+
+// Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
+async function loadBuildLists() {
+  if (!state.music) state.music = await api('/api/music').catch(() => []);
+  if (ME.tts && !state.voices) state.voices = await api('/api/voices').catch(e => { fail(e); return []; });
+}
+
+// "all:sw" = every Swahili script, a number = one script, '' = clips only.
+function chosenScripts() {
+  const scripts = state.data.scripts;
+  if (build.script.startsWith('all:')) return scripts.filter(s => s.language === build.script.slice(4)).map(s => s.id);
+  return scripts.some(s => String(s.id) === build.script) ? [Number(build.script)] : [];
+}
+
 function renderBuildBar() {
   const bb = $('#buildbar');
   const n = k => state.sel[k].size;
-  const count = Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
   const any = n('hook') + n('body') + n('cta') > 0;
   if (state.tab !== 'footage' || !any) return bb.classList.add('hidden');
+  if (!state.music || (ME.tts && !state.voices)) loadBuildLists().then(() => { if (state.tab === 'footage') renderBuildBar(); });
   const scripts = state.data.scripts;
+  const sids = chosenScripts();
+  const clipsCount = Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
+  const count = clipsCount * Math.max(sids.length, 1);
+  const langs = [...new Set(scripts.map(s => s.language))];
+  const voices = state.voices || [];
+  const tracks = state.music || [];
+  if (build.voice && voices.length && !voices.some(v => v.id === build.voice)) build.voice = '';
   bb.classList.remove('hidden');
   bb.innerHTML = `<div class="inner">
-    <div class="formula"><b>${n('hook')}</b> hook${n('hook') === 1 ? '' : 's'} × <b>${n('body')}</b> bod${n('body') === 1 ? 'y' : 'ies'} × <b>${n('cta')}</b> CTA${n('cta') === 1 ? '' : 's'}
+    <div class="formula"><b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}
       = <b>${count}</b> video${count === 1 ? '' : 's'}</div>
-    ${scripts.length ? `<select id="bbScript"><option value="">No script linked</option>${scripts.map(s =>
-      `<option value="${s.id}">${esc(s.language.toUpperCase())} · ${esc(s.angle || 'script')} · ${esc(s.hook.slice(0, 50))}</option>`).join('')}</select>` : ''}
+    <label class="bbf">📝 <select id="bbScript">
+      <option value="">No script (clips only)</option>
+      ${langs.map(l => `<option value="all:${l}" ${build.script === `all:${l}` ? 'selected' : ''}>All ${ME.languages[l] || l} scripts (${scripts.filter(s => s.language === l).length})</option>`).join('')}
+      ${scripts.map(s => `<option value="${s.id}" ${build.script === String(s.id) ? 'selected' : ''}>${esc(s.language.toUpperCase())} · ${esc(s.angle || 'script')} · ${esc(s.hook.slice(0, 40))}</option>`).join('')}
+    </select></label>
+    <label class="bbf" title="${ME.tts ? '' : 'Add ELEVENLABS_API_KEY on the server to turn this on'}">🎙 <select id="bbVoice" ${ME.tts && sids.length ? '' : 'disabled'}>
+      <option value="">${ME.tts ? 'No voice' : 'Voice: not set up'}</option>
+      ${voices.map(v => `<option value="${esc(v.id)}" ${build.voice === v.id ? 'selected' : ''}>${esc(v.name)}${v.info ? ` · ${esc(v.info)}` : ''}</option>`).join('')}
+    </select></label>
+    <label class="bbf">🎵 <select id="bbMusic">
+      <option value="none" ${build.music === 'none' ? 'selected' : ''}>No music</option>
+      <option value="random" ${build.music === 'random' ? 'selected' : ''} ${tracks.length ? '' : 'disabled'}>Random track (${tracks.length})</option>
+      ${tracks.map(m => `<option value="${m.id}" ${build.music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+    </select></label>
+    <label class="bbf"><input type="checkbox" id="bbCaptions" ${build.captions ? 'checked' : ''} ${sids.length && ME.captions ? '' : 'disabled'}> Captions</label>
     <button class="btn sm" id="bbClear" style="margin-left:auto">Clear</button>
     <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
   </div>`;
+  $('#bbScript').onchange = e => { build.script = e.target.value; saveBuild(); renderBuildBar(); };
+  $('#bbVoice').onchange = e => { build.voice = e.target.value; saveBuild(); };
+  $('#bbMusic').onchange = e => { build.music = e.target.value; saveBuild(); };
+  $('#bbCaptions').onchange = e => { build.captions = e.target.checked; saveBuild(); };
   $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
   $('#bbBuild').onclick = async () => {
+    const v = voices.find(x => x.id === build.voice);
     try {
       await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
-        hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_id: $('#bbScript')?.value || null } });
+        hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: sids,
+        voice_id: sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
+        music: build.music === 'random' && !tracks.length ? 'none' : build.music, captions: build.captions } });
       state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
       toast(`${count} video(s) are being made`);
       location.hash = `product/${state.product}/creatives`;
@@ -394,7 +444,10 @@ function renderScripts() {
 }
 
 // Creatives: finished videos, their state, status and download.
+const musicName = id => (state.musicAll || []).find(m => m.id === id)?.name || 'music';
+
 function renderCreatives() {
+  if (!state.musicAll) api('/api/music').then(m => { state.musicAll = m; if (state.tab === 'creatives') renderCreatives(); }).catch(() => {});
   const { creatives, scripts, clips } = state.data;
   const clipName = id => clips.find(c => c.id === id)?.label || (id ? `#${id}` : '');
   const t = $('#tab');
@@ -418,6 +471,7 @@ function renderCreatives() {
             <input type="text" value="${esc(c.name)}" data-name title="Name">
             <div class="small muted">${[c.hook_clip && `Hook: ${esc(clipName(c.hook_clip))}`, c.body_clip && `Body: ${esc(clipName(c.body_clip))}`, c.cta_clip && `CTA: ${esc(clipName(c.cta_clip))}`].filter(Boolean).join('<br>')}</div>
             ${s ? `<div class="small" title="${esc(s.hook + '\n\n' + s.body + '\n\n' + s.cta)}">📝 ${esc(s.language.toUpperCase())} · ${esc(s.hook.slice(0, 60))}</div>` : ''}
+            ${c.voice_name || c.music_id || c.captions ? `<div class="small muted">${[c.voice_name && `🎙 ${esc(c.voice_name)}`, c.music_id && `🎵 ${esc(musicName(c.music_id))}`, c.captions && '💬 captions'].filter(Boolean).join(' · ')}</div>` : ''}
             <div class="row" style="flex-wrap:nowrap">
               <select data-status class="status-${c.status}">${ME.statuses.map(x => `<option value="${x}" ${x === c.status ? 'selected' : ''}>${STATUS_LABEL[x]}</option>`).join('')}</select>
               ${c.render === 'ready' ? `<a class="btn sm" href="/media/creative/${c.id}?download=1" title="Download">⬇</a>` : ''}
@@ -464,6 +518,44 @@ function play(src) {
   m.onclick = e => { if (e.target === m) m.remove(); };
   document.addEventListener('keydown', function k(e) { if (e.key === 'Escape') { m.remove(); document.removeEventListener('keydown', k); } });
   document.body.appendChild(m);
+}
+
+// ---------- Music library ----------
+async function renderMusic() {
+  const v = $('#view');
+  const tracks = await api('/api/music').catch(fail) || [];
+  state.musicAll = tracks;
+  v.innerHTML = `
+    <h1>Music</h1>
+    <p class="muted">Tracks for the background of the ads, shared by all products. Use music you are allowed to use in ads
+      (Meta Sound Collection, Pixabay Music, YouTube Audio Library…): TikTok trending sounds get ads muted or rejected.
+      Under a voice-over the music plays quietly.</p>
+    <div class="card">
+      <div class="drop" id="musicDrop">⬆ Drop music here or click to upload (mp3, m4a, wav… up to 50 MB)<input type="file" accept="audio/*" multiple class="hidden"></div>
+      <div class="progress hidden"><div></div></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      ${tracks.length ? `<table class="t"><thead><tr><th>Name</th><th>Listen</th><th>Length</th><th>Used in</th><th></th></tr></thead><tbody>
+        ${tracks.map(m => `<tr data-id="${m.id}">
+          <td><input type="text" value="${esc(m.name)}" data-name></td>
+          <td><audio controls preload="none" src="/media/music/${m.id}" style="height:32px"></audio></td>
+          <td>${fmtDur(m.duration)}</td><td>${m.used} video${m.used === 1 ? '' : 's'}</td>
+          <td><button class="btn sm danger" data-del>✕</button></td></tr>`).join('')}
+      </tbody></table>` : '<div class="empty">No music yet.</div>'}
+    </div>`;
+  const d = $('#musicDrop'), input = $('input', d);
+  const send = files => upload('/api/music', {}, files, d, r => `${r.added} track(s) added${r.skipped?.length ? ` · not audio: ${r.skipped.join(', ')}` : ''}`,
+    r => !!r.skipped?.length, renderMusic);
+  d.onclick = e => { if (e.target !== input) input.click(); };
+  input.onchange = () => send(input.files);
+  d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
+  d.ondragleave = () => d.classList.remove('over');
+  d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); send(e.dataTransfer.files); };
+  v.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = Number(tr.dataset.id);
+    $('[data-name]', tr).onchange = e => api(`/api/music/${id}`, { method: 'PATCH', body: { name: e.target.value } }).then(() => toast('Renamed'), fail);
+    $('[data-del]', tr).onclick = () => { if (confirm('Delete this track?')) api(`/api/music/${id}`, { method: 'DELETE' }).then(renderMusic, fail); };
+  });
 }
 
 // ---------- Team ----------

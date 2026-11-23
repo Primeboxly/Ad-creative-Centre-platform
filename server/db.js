@@ -85,7 +85,26 @@ CREATE TABLE IF NOT EXISTS creatives (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_creatives_product ON creatives(product_id);
+-- Background music tracks, shared by all products.
+CREATE TABLE IF NOT EXISTS music (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  file TEXT NOT NULL,
+  duration REAL NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
+
+// Columns added after the first version (kept separate so old databases get them too).
+const addColumn = (table, col, def) => {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+};
+addColumn('products', 'banner', "TEXT NOT NULL DEFAULT ''");       // CTA banner text, e.g. "PAY ON DELIVERY · 680 ZMW"
+addColumn('creatives', 'voice_id', "TEXT NOT NULL DEFAULT ''");    // ElevenLabs voice reading the script ('' = none)
+addColumn('creatives', 'voice_name', "TEXT NOT NULL DEFAULT ''");
+addColumn('creatives', 'music_id', 'INTEGER REFERENCES music(id) ON DELETE SET NULL');
+addColumn('creatives', 'captions', 'INTEGER NOT NULL DEFAULT 0');
 
 export function tx(fn) {
   db.exec('BEGIN');
