@@ -13,35 +13,56 @@ const LANG_CODE = { en: 'en', sw: 'sw', fr: 'fr' };
 export const ttsReady = () => Boolean(process.env.ELEVENLABS_API_KEY);
 const headers = () => ({ 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json' });
 
-async function failure(r) {
+// permission = the key setting needed for this call, named as on the ElevenLabs API key page.
+async function failure(r, permission = 'Text to Speech → Access') {
   let msg = '';
   try { const j = await r.json(); msg = j?.detail?.message || j?.detail?.status || (typeof j?.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? j)); } catch {}
-  if (r.status === 401) return new HttpError(502, 'ElevenLabs key is wrong or missing (ELEVENLABS_API_KEY).');
+  if (r.status === 401 || r.status === 403)
+    return new HttpError(502, `ElevenLabs refused the key: it is wrong, or it lacks the permission "${permission}". ${msg}`.trim());
   if (r.status === 429) return new HttpError(429, 'ElevenLabs is busy or your monthly characters are used up. ' + msg);
   return new HttpError(502, `ElevenLabs error ${r.status}: ${msg}`.slice(0, 300));
 }
 
 // The account's voices (premade + your own), cached 10 minutes.
 let cache = { at: 0, list: [] };
-export async function listVoices() {
-  if (!ttsReady()) return [];
-  if (Date.now() - cache.at < 10 * 60e3 && cache.list.length) return cache.list;
+const toVoice = v => {
+  const l = v.labels || {};
+  return { id: v.voice_id, name: v.name, category: v.category || '', preview: v.preview_url || '',
+    info: [l.gender, l.accent, l.age, l.language].filter(Boolean).join(' · ') };
+};
+
+// v2 lists the voices page by page; the older v1 list is tried when v2 fails or gives nothing.
+async function voicesV2() {
   const list = [];
   let token = null;
   for (let page = 0; page < 5; page++) {
     const q = new URLSearchParams({ page_size: '100', sort: 'name', sort_direction: 'asc' });
     if (token) q.set('next_page_token', token);
     const r = await fetch(`${API}/v2/voices?${q}`, { headers: headers() });
-    if (!r.ok) throw await failure(r);
+    if (!r.ok) throw await failure(r, 'Voices → Read');
     const j = await r.json();
-    for (const v of j.voices || []) {
-      const l = v.labels || {};
-      list.push({ id: v.voice_id, name: v.name, category: v.category || '', preview: v.preview_url || '',
-        info: [l.gender, l.accent, l.age, l.language].filter(Boolean).join(' · ') });
-    }
+    list.push(...(j.voices || []).map(toVoice));
     if (!j.has_more || !j.next_page_token) break;
     token = j.next_page_token;
   }
+  return list;
+}
+
+async function voicesV1() {
+  const r = await fetch(`${API}/v1/voices`, { headers: headers() });
+  if (!r.ok) throw await failure(r, 'Voices → Read');
+  return ((await r.json()).voices || []).map(toVoice).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function listVoices() {
+  if (!ttsReady()) return [];
+  if (Date.now() - cache.at < 10 * 60e3 && cache.list.length) return cache.list;
+  let list = [], error = null;
+  try { list = await voicesV2(); } catch (e) { error = e; }
+  if (!list.length) {
+    try { list = await voicesV1(); } catch (e) { error ??= e; }
+  }
+  if (!list.length && error) throw error;
   cache = { at: Date.now(), list };
   return list;
 }

@@ -17,7 +17,7 @@ const PORT = Number(process.env.PORT) || 3100;
 const PROD = process.env.NODE_ENV === 'production';
 const KINDS = ['hook', 'body', 'cta'];
 const STATUSES = ['draft', 'testing', 'winner', 'loser'];
-const MAX_COMBOS = 60;
+const MAX_COMBOS = 100;
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');

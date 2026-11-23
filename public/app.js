@@ -302,13 +302,16 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = ()
 }
 
 // Build options are remembered in this browser.
-const build = Object.assign({ script: '', voice: '', music: 'video', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+const build = Object.assign({ script: '', voice: '', voiceName: '', music: 'video', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
 const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
 
 // Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
 async function loadBuildLists() {
   if (!state.music) state.music = await api('/api/music').catch(() => []);
-  if (ME.tts && !state.voices) state.voices = await api('/api/voices').catch(e => { fail(e); return []; });
+  if (ME.tts && !state.voices) {
+    state.voicesError = '';
+    state.voices = await api('/api/voices').catch(e => { state.voicesError = e.message; return []; });
+  }
 }
 
 // "all:sw" = every Swahili script, a number = one script, '' = clips only.
@@ -331,7 +334,6 @@ function renderBuildBar() {
   const langs = [...new Set(scripts.map(s => s.language))];
   const voices = state.voices || [];
   const tracks = state.music || [];
-  if (build.voice && voices.length && !voices.some(v => v.id === build.voice)) build.voice = '';
   bb.classList.remove('hidden');
   bb.innerHTML = `<div class="inner">
     <div class="formula"><b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}
@@ -342,8 +344,10 @@ function renderBuildBar() {
       ${scripts.map(s => `<option value="${s.id}" ${build.script === String(s.id) ? 'selected' : ''}>${esc(s.language.toUpperCase())} · ${esc(s.angle || 'script')} · ${esc(s.hook.slice(0, 40))}</option>`).join('')}
     </select></label>
     <label class="bbf" title="${ME.tts ? '' : 'Add ELEVENLABS_API_KEY on the server to turn this on'}">🎙 <select id="bbVoice" ${ME.tts && sids.length ? '' : 'disabled'}>
-      <option value="">${ME.tts ? 'No voice' : 'Voice: not set up'}</option>
+      <option value="">${ME.tts ? (state.voices && !voices.length ? (state.voicesError ? '⚠ Voices not loaded' : 'No voices found') : 'No voice') : 'Voice: not set up'}</option>
       ${voices.map(v => `<option value="${esc(v.id)}" ${build.voice === v.id ? 'selected' : ''}>${esc(v.name)}${v.info ? ` · ${esc(v.info)}` : ''}</option>`).join('')}
+      ${build.voice && !voices.some(v => v.id === build.voice) ? `<option value="${esc(build.voice)}" selected>${esc(build.voiceName || 'Voice ID ' + build.voice)}</option>` : ''}
+      ${ME.tts ? '<option value="__paste">✏️ Paste a voice ID…</option>' : ''}
     </select></label>
     <label class="bbf">🎵 <select id="bbMusic">
       <option value="video" ${build.music === 'video' ? 'selected' : ''}>🎬 Music of the TikTok video</option>
@@ -356,12 +360,23 @@ function renderBuildBar() {
     <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
   </div>`;
   $('#bbScript').onchange = e => { build.script = e.target.value; saveBuild(); renderBuildBar(); };
-  $('#bbVoice').onchange = e => { build.voice = e.target.value; saveBuild(); };
+  $('#bbVoice').onchange = e => {
+    if (e.target.value === '__paste') {
+      const id = (prompt('ElevenLabs voice ID (in ElevenLabs: Voices → a voice → ⋯ → Copy voice ID):') || '').trim();
+      if (id) { build.voice = id; build.voiceName = 'Voice ' + id.slice(0, 8); }
+    } else {
+      build.voice = e.target.value;
+      build.voiceName = voices.find(v => v.id === build.voice)?.name || '';
+    }
+    saveBuild(); renderBuildBar();
+  };
+  if (state.voicesError) $('#bbVoice').title = state.voicesError;
   $('#bbMusic').onchange = e => { build.music = e.target.value; saveBuild(); };
   $('#bbCaptions').onchange = e => { build.captions = e.target.checked; saveBuild(); };
   $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
+  if (state.voicesError && !state.voicesErrorShown) { state.voicesErrorShown = true; fail(new Error('Voices: ' + state.voicesError)); }
   $('#bbBuild').onclick = async () => {
-    const v = voices.find(x => x.id === build.voice);
+    const v = voices.find(x => x.id === build.voice) || (build.voice ? { name: build.voiceName } : null);
     try {
       await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
         hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: sids,
