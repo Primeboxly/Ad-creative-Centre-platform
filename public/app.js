@@ -170,11 +170,27 @@ async function renderProduct(id) {
 }
 
 // Footage: three lanes (hook / body / CTA), upload, select clips to build videos.
+const RAW_STATE = { queued: '⏳ Waiting', splitting: '✂️ Cutting…', done: '✅ Done', failed: '❌ Failed' };
+
 function renderFootage() {
-  const { clips } = state.data;
+  const { clips, raws } = state.data;
   const t = $('#tab');
   t.innerHTML = `
-    <p class="muted" style="margin-top:0">Put the footage of this product in the right lane (your TikTok downloads, phone videos, supplier videos).
+    <div class="card autosplit">
+      <h2>✂️ Auto-split full videos</h2>
+      <div class="hint">Drop whole videos (your TikTok downloads). Each one is cut by itself: the first ~3 s go to <b>Hook</b>,
+        the middle to <b>Body</b>, the last ~3 s to <b>CTA</b>, on scene changes when there are some. Check the clips after and move or delete the ones you don't like.</div>
+      <div class="drop" data-raw>⬆ Drop full videos here or click to upload<input type="file" accept="video/*" multiple class="hidden"></div>
+      <div class="progress hidden"><div></div></div>
+      ${raws.length ? `<div class="raws">${raws.map(r => `
+        <div class="raw" data-id="${r.id}">
+          <span class="rname">${esc(r.original_name)}</span>
+          <span class="rstate ${r.status}">${RAW_STATE[r.status]}${r.status === 'done' ? ` · ${r.parts} clips` : ''}</span>
+          ${r.status === 'failed' ? `<span class="small muted">${esc(r.error).slice(0, 120)}</span><button class="btn sm" data-rretry>Try again</button>` : ''}
+          ${r.status === 'failed' || r.status === 'queued' ? '<button class="btn sm danger" data-rdel>✕</button>' : ''}
+        </div>`).join('')}</div>` : ''}
+    </div>
+    <p class="muted">Or put already-cut clips straight in the right lane.
     Tick clips in each lane, then <b>Build videos</b>: every hook × body × CTA you ticked becomes one ad.</p>
     <div class="grid lanes">
       ${Object.keys(KINDS).map(k => `
@@ -204,12 +220,29 @@ function renderFootage() {
 
   t.querySelectorAll('.drop').forEach(d => {
     const input = $('input', d);
+    const send = files => (d.dataset.raw !== undefined ? uploadRaw(files, d) : uploadClips(d.dataset.kind, files, d));
     d.onclick = e => { if (e.target !== input) input.click(); };
-    input.onchange = () => uploadClips(d.dataset.kind, input.files, d);
+    input.onchange = () => send(input.files);
     d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
     d.ondragleave = () => d.classList.remove('over');
-    d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); uploadClips(d.dataset.kind, e.dataTransfer.files, d); };
+    d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); send(e.dataTransfer.files); };
   });
+  t.querySelectorAll('.raw').forEach(el => {
+    const id = Number(el.dataset.id);
+    const rt = $('[data-rretry]', el), rd = $('[data-rdel]', el);
+    if (rt) rt.onclick = () => api(`/api/raws/${id}/retry`, { method: 'POST' }).then(() => renderProduct(state.product), fail);
+    if (rd) rd.onclick = () => api(`/api/raws/${id}`, { method: 'DELETE' }).then(() => renderProduct(state.product), fail);
+  });
+  // While videos are being cut, check every 3 seconds and show the new clips.
+  clearInterval(state.poll);
+  if (raws.some(r => r.status === 'queued' || r.status === 'splitting')) {
+    state.poll = setInterval(async () => {
+      if (state.tab !== 'footage' || !location.hash.startsWith(`#product/${state.product}`)) return clearInterval(state.poll);
+      const before = JSON.stringify(state.data.raws.map(r => r.status));
+      await loadProduct(state.product).catch(() => {});
+      if (JSON.stringify(state.data.raws.map(r => r.status)) !== before) renderProduct(state.product);
+    }, 3000);
+  }
   t.querySelectorAll('[data-all]').forEach(b => b.onclick = () => {
     const k = b.dataset.all, all = state.data.clips.filter(c => c.kind === k).map(c => c.id);
     const every = all.every(id => state.sel[k].has(id));
@@ -236,20 +269,26 @@ function renderFootage() {
   renderBuildBar();
 }
 
+function uploadRaw(files, drop) { upload(`/api/products/${state.product}/raw`, {}, files, drop, r => `${r.queued} video(s) are being cut`); }
 function uploadClips(kind, files, drop) {
+  upload(`/api/products/${state.product}/clips`, { kind }, files, drop,
+    r => `${r.added} clip(s) added${r.skipped?.length ? ` · not a video: ${r.skipped.join(', ')}` : ''}`, r => !!r.skipped?.length);
+}
+
+function upload(url, fields, files, drop, okMsg, isWarn = () => false) {
   if (!files?.length) return;
   const fd = new FormData();
-  fd.append('kind', kind);
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   for (const f of files) fd.append('files', f);
   const bar = drop.nextElementSibling;
   bar.classList.remove('hidden');
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', `/api/products/${state.product}/clips`);
+  xhr.open('POST', url);
   xhr.upload.onprogress = e => { if (e.lengthComputable) $('div', bar).style.width = `${(e.loaded / e.total) * 100}%`; };
   xhr.onload = () => {
     const r = JSON.parse(xhr.responseText || '{}');
     if (xhr.status >= 300) return fail(new Error(r.error || 'Upload failed')), bar.classList.add('hidden');
-    toast(`${r.added} clip(s) added${r.skipped?.length ? ` · not a video: ${r.skipped.join(', ')}` : ''}`, !!r.skipped?.length);
+    toast(okMsg(r), isWarn(r));
     renderProduct(state.product);
   };
   xhr.onerror = () => { fail(new Error('Upload failed: check your connection')); bar.classList.add('hidden'); };

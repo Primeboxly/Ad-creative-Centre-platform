@@ -4,11 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, existsSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { db, tx } from './db.js';
-import { ROOT, CLIPS_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR } from './paths.js';
+import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile } from './video.js';
 import { writeScripts, LANGUAGES, aiReady } from './ai.js';
+import { queueSplits, resumeSplits, rawName } from './split.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3100;
@@ -149,6 +150,8 @@ app.get('/api/products/:id', (req, res) => {
     clips: db.prepare(`SELECT c.*, u.name uploader FROM clips c LEFT JOIN users u ON u.id = c.uploaded_by WHERE c.product_id = ? ORDER BY c.kind, c.id`).all(p.id),
     scripts: db.prepare(`SELECT s.*, u.name author FROM scripts s LEFT JOIN users u ON u.id = s.created_by WHERE s.product_id = ? ORDER BY s.id DESC`).all(p.id),
     creatives: db.prepare(`SELECT c.*, u.name author FROM creatives c LEFT JOIN users u ON u.id = c.created_by WHERE c.product_id = ? ORDER BY c.id DESC`).all(p.id),
+    // Full videos being auto-split (and the ones that failed). Finished ones are kept 1 hour to show "done".
+    raws: db.prepare(`SELECT id, original_name, status, error, parts FROM raws WHERE product_id = ? AND (status <> 'done' OR created_at > datetime('now', '-1 hour')) ORDER BY id`).all(p.id),
   });
 });
 
@@ -165,9 +168,11 @@ app.delete('/api/products/:id', requireAdmin, (req, res) => {
   const p = productOr404(idParam(req.params.id));
   const clips = db.prepare(`SELECT id, file FROM clips WHERE product_id = ?`).all(p.id);
   const creatives = db.prepare(`SELECT id, file FROM creatives WHERE product_id = ?`).all(p.id);
+  const raws = db.prepare(`SELECT file FROM raws WHERE product_id = ? AND status <> 'splitting'`).all(p.id);
   db.prepare(`DELETE FROM products WHERE id = ?`).run(p.id);
   for (const c of clips) { removeFile(CLIPS_DIR, c.file); rmSync(thumbOf('clip', c.id), { force: true }); }
   for (const c of creatives) { removeFile(RENDERS_DIR, c.file); rmSync(thumbOf('creative', c.id), { force: true }); }
+  for (const r of raws) removeFile(RAW_DIR, r.file);
   res.json({ ok: true });
 });
 
@@ -222,6 +227,47 @@ app.delete('/api/clips/:id', (req, res) => {
   db.prepare(`DELETE FROM clips WHERE id = ?`).run(c.id);
   removeFile(CLIPS_DIR, c.file);
   rmSync(thumbOf('clip', c.id), { force: true });
+  res.json({ ok: true });
+});
+
+// ---------- Auto-split: full videos in, hook + body + CTA clips out ----------
+app.post('/api/products/:id/raw', upload.array('files'), (req, res) => {
+  const files = req.files || [];
+  try {
+    const p = productOr404(idParam(req.params.id));
+    if (!files.length) throw new HttpError(400, `No video received (accepted: ${VIDEO_EXT.join(' ')})`);
+    tx(() => {
+      for (const f of files) {
+        const name = rawName(p.id, f.originalname);
+        renameSync(f.path, join(RAW_DIR, name));
+        db.prepare(`INSERT INTO raws (product_id, file, original_name, uploaded_by) VALUES (?,?,?,?)`).run(p.id, name, f.originalname.slice(0, 200), req.user.id);
+      }
+    });
+    queueSplits();
+    res.status(201).json({ queued: files.length });
+  } finally { files.forEach(f => rmSync(f.path, { force: true })); }
+});
+
+const rawOr404 = id => {
+  const r = db.prepare(`SELECT * FROM raws WHERE id = ?`).get(id);
+  if (!r) throw new HttpError(404, 'Video not found');
+  return r;
+};
+
+app.post('/api/raws/:id/retry', (req, res) => {
+  const r = rawOr404(idParam(req.params.id));
+  if (r.status !== 'failed') throw new HttpError(400, 'Only a failed video can be tried again');
+  if (!existsSync(join(RAW_DIR, r.file))) throw new HttpError(410, 'The video file is gone: upload it again');
+  db.prepare(`UPDATE raws SET status = 'queued', error = '' WHERE id = ?`).run(r.id);
+  queueSplits();
+  res.json({ ok: true });
+});
+
+app.delete('/api/raws/:id', (req, res) => {
+  const r = rawOr404(idParam(req.params.id));
+  if (r.status === 'splitting') throw new HttpError(409, 'This video is being cut right now. Wait a moment.');
+  db.prepare(`DELETE FROM raws WHERE id = ?`).run(r.id);
+  removeFile(RAW_DIR, r.file);
   res.json({ ok: true });
 });
 
@@ -349,4 +395,5 @@ if (noUsers() && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
 }
 
 resumeRenders();
+resumeSplits();
 app.listen(PORT, () => console.log(`Ad creative Centre on http://localhost:${PORT}`));

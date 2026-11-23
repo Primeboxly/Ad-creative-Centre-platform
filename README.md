@@ -24,6 +24,7 @@ Without a key everything works except the **Generate** button (scripts can still
 | Page | What it does |
 |---|---|
 | Products | One card per product: number of hooks / bodies / CTAs, scripts, videos, winners |
+| Product → Footage → Auto-split | Drop whole videos (your TikTok downloads). Each is cut by itself: first ~3 s → Hook, middle → Body, last ~3 s → CTA, moved onto a scene change when one is near (hook ends between 1.5 and 4 s, CTA starts 2 to 5 s before the end). Videos under 7 s give a hook + body only |
 | Product → Footage | Three lanes (Hook, Body, CTA). Drop videos in a lane (mp4, mov, webm…, up to 500 MB each). Rename a clip, move it to another lane, delete it. Tick clips, then **Build N videos** at the bottom |
 | Product → Scripts | **Generate** scripts with AI (language, how many, extra instructions) or add one by hand. Copy button for the editor / voice-over |
 | Product → Creatives | The finished videos: play, rename, download, mark **Draft / Testing / Winner / Loser**, filter by status |

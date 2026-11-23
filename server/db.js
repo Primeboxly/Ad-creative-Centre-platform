@@ -41,6 +41,18 @@ CREATE TABLE IF NOT EXISTS clips (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_clips_product ON clips(product_id, kind);
+-- A full video uploaded to be auto-split into hook + body + CTA clips (deleted once split).
+CREATE TABLE IF NOT EXISTS raws (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  original_name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','splitting','done','failed')),
+  error TEXT NOT NULL DEFAULT '',
+  parts INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- AI (or hand) written scripts: hook + body + CTA in one language.
 CREATE TABLE IF NOT EXISTS scripts (
   id INTEGER PRIMARY KEY,

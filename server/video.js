@@ -9,7 +9,7 @@ import { CLIPS_DIR, RENDERS_DIR, THUMBS_DIR } from './paths.js';
 const FFMPEG = process.env.FFMPEG_PATH || ffmpegPath;
 export const WIDTH = 1080, HEIGHT = 1920; // vertical: Reels, TikTok, Stories
 
-function run(args) {
+export function run(args) {
   return new Promise(resolve => {
     const p = spawn(FFMPEG, ['-hide_banner', ...args], { windowsHide: true });
     let err = '';
