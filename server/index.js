@@ -1,14 +1,14 @@
 import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
-import { renameSync, rmSync, existsSync } from 'node:fs';
+import { renameSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { db, tx } from './db.js';
 import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR, MUSIC_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady, extractAudio } from './video.js';
-import { ttsReady, listVoices } from './tts.js';
+import { ttsReady, listVoices, composeMusic } from './tts.js';
 import { writeScripts, LANGUAGES, aiReady } from './ai.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
 
@@ -325,20 +325,28 @@ app.post('/api/products/:id/creatives', (req, res) => {
   if (voiceId && !scriptIds.length) throw new HttpError(400, 'Choose a script for the voice to read');
   if (voiceId && !ttsReady()) throw new HttpError(503, 'Voice-over is not set up: add ELEVENLABS_API_KEY to the server settings.');
   const captions = req.body?.captions && scriptIds.length ? 1 : 0;
-  // Music: 'none', 'video' (the sound of the TikTok the body/hook clip came from), 'random' (a different track
-  // per video) or one track id.
+  // Music: 'none', 'product' (a different AI track made for this product per video), 'video' (the sound of the
+  // TikTok the body/hook clip came from), 'random' (a different library track per video) or one track id.
   const tracks = db.prepare(`SELECT id FROM music`).all().map(m => m.id);
+  const productTracks = db.prepare(`SELECT id FROM music WHERE product_id = ?`).all(p.id).map(m => m.id);
   const musicChoice = String(req.body?.music ?? 'none');
-  if (!['none', 'random', 'video'].includes(musicChoice) && !tracks.includes(Number(musicChoice))) throw new HttpError(400, 'Unknown music track');
+  if (!['none', 'random', 'video', 'product'].includes(musicChoice) && !tracks.includes(Number(musicChoice))) throw new HttpError(400, 'Unknown music track');
   if (musicChoice === 'random' && !tracks.length) throw new HttpError(400, 'The music library is empty: add tracks in Music first');
+  if (musicChoice === 'product' && !productTracks.length) throw new HttpError(400, 'No AI music for this product yet: click "✨ Make music" first');
+  // A TikTok's sound has its creator speaking in it: never under our own voice-over.
+  if (musicChoice === 'video' && voiceId) throw new HttpError(400, 'The TikTok sound has the creator\'s voice in it: with a voice-over choose AI music, a library track or no music');
   const clipMusic = id => (id ? db.prepare(`SELECT music_id FROM clips WHERE id = ?`).get(id)?.music_id : null) || null;
-  let shuffle = [];
+  const bags = {};
+  const pickFrom = (key, list) => {
+    if (!bags[key]?.length) bags[key] = [...list].sort(() => Math.random() - 0.5);
+    return bags[key].pop();
+  };
   const musicFor = (hk, b, c) => {
     if (musicChoice === 'none') return null;
     if (musicChoice === 'video') return clipMusic(b) || clipMusic(hk) || clipMusic(c);
-    if (musicChoice !== 'random') return Number(musicChoice);
-    if (!shuffle.length) shuffle = [...tracks].sort(() => Math.random() - 0.5);
-    return shuffle.pop();
+    if (musicChoice === 'product') return pickFrom('product', productTracks);
+    if (musicChoice === 'random') return pickFrom('all', tracks);
+    return Number(musicChoice);
   };
   const combos = [];
   for (const hk of hooks) for (const b of bodies) for (const c of ctas) if (hk || b || c)
@@ -348,9 +356,7 @@ app.post('/api/products/:id/creatives', (req, res) => {
   const ids = tx(() => combos.map(([hk, b, c, sid]) => {
     const name = [hk && `H${hk}`, b && `B${b}`, c && `C${c}`, sid && `S${sid}`].filter(Boolean).join(' + ');
     const music = musicFor(hk, b, c);
-    // 'video' but the clips came without a saved sound (cut before this existed, or put straight in a lane):
-    // keep the clips' own sound quietly under the voice instead.
-    const clipSound = musicChoice === 'video' && !music ? 1 : 0;
+    const clipSound = 0; // clips' own sound never goes under a voice-over (it often has someone speaking)
     return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id, captions, clip_sound)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', music, captions, clipSound).lastInsertRowid;
@@ -426,6 +432,27 @@ app.post('/api/music', audioUpload.array('files'), async (req, res) => {
     }
     res.status(201).json({ added: added.length, skipped });
   } finally { files.forEach(f => rmSync(f.path, { force: true })); }
+});
+
+// AI music (ElevenLabs): 1-3 instrumental tracks from a description, optionally made for one product.
+app.post('/api/music/generate', async (req, res) => {
+  const prompt = str(req.body?.prompt, 400);
+  if (prompt.length < 3) throw new HttpError(400, 'Describe the music (e.g. "elegant luxury pop, soft piano, confident")');
+  const count = Math.min(Math.max(Number(req.body?.count) || 1, 1), 3);
+  const seconds = Math.min(Math.max(Number(req.body?.seconds) || 30, 10), 120);
+  const pid = req.body?.product_id ? Number(req.body.product_id) : null;
+  if (pid) productOr404(pid);
+  const ids = [];
+  for (let i = 0; i < count; i++) {
+    const audio = await composeMusic(prompt, seconds);
+    const name = `music-${randomBytes(8).toString('hex')}.mp3`;
+    writeFileSync(join(MUSIC_DIR, name), audio);
+    const info = await probe(join(MUSIC_DIR, name));
+    ids.push(db.prepare(`INSERT INTO music (name, file, duration, uploaded_by, product_id, prompt) VALUES (?,?,?,?,?,?)`)
+      .run(`✨ ${prompt.slice(0, 60)}${count > 1 ? ` #${i + 1}` : ''}`, name, info.duration || seconds, req.user.id, pid, prompt).lastInsertRowid);
+  }
+  if (pid) db.prepare(`UPDATE products SET music_style = ? WHERE id = ?`).run(prompt, pid);
+  res.status(201).json({ ids });
 });
 
 app.patch('/api/music/:id', (req, res) => {

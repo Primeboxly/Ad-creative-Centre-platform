@@ -108,6 +108,9 @@ addColumn('creatives', 'captions', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('music', 'from_video', "TEXT NOT NULL DEFAULT ''");      // the video this sound was taken from ('' = uploaded music)
 addColumn('clips', 'music_id', 'INTEGER REFERENCES music(id) ON DELETE SET NULL'); // sound of the video the clip was cut from
 addColumn('creatives', 'clip_sound', 'INTEGER NOT NULL DEFAULT 0'); // keep the clips' own sound under the voice
+addColumn('music', 'product_id', 'INTEGER REFERENCES products(id) ON DELETE SET NULL'); // AI music made for this product
+addColumn('music', 'prompt', "TEXT NOT NULL DEFAULT ''");          // the description it was made from (AI music)
+addColumn('products', 'music_style', "TEXT NOT NULL DEFAULT ''");  // last music description used for the product
 
 export function tx(fn) {
   db.exec('BEGIN');

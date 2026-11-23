@@ -67,6 +67,31 @@ export async function listVoices() {
   return list;
 }
 
+// ---------- Music (Eleven Music) ----------
+// Instrumental music from a short description, e.g. "elegant luxury pop, soft piano, confident, for a watch ad".
+// Returns the MP3 bytes. Music cannot name artists or songs (ElevenLabs refuses with a suggestion).
+const MUSIC_MODEL = process.env.ELEVENLABS_MUSIC_MODEL || 'music_v2_5';
+export async function composeMusic(prompt, seconds = 30) {
+  if (!ttsReady()) throw new HttpError(503, 'ElevenLabs is not set up: add ELEVENLABS_API_KEY to the server settings.');
+  const ms = Math.round(Math.min(Math.max(Number(seconds) || 30, 10), 120) * 1000);
+  const ask = model => fetch(`${API}/v1/music?output_format=mp3_44100_128`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({ prompt, music_length_ms: ms, model_id: model, force_instrumental: true }),
+  });
+  let r = await ask(MUSIC_MODEL);
+  if (r.status === 422 && MUSIC_MODEL !== 'music_v1') r = await ask('music_v1'); // older model as a second try
+  if (!r.ok) {
+    if (r.status === 400 || r.status === 422) {
+      let j = {};
+      try { j = await r.clone().json(); } catch {}
+      const tip = j?.detail?.data?.prompt_suggestion;
+      if (j?.detail?.status === 'bad_prompt') throw new HttpError(400, `ElevenLabs refused this description (no artist or song names).${tip ? ` Try: "${tip}"` : ''}`);
+    }
+    throw await failure(r, 'Music Generation → Access');
+  }
+  return Buffer.from(await r.arrayBuffer());
+}
+
 // Text → MP3 file path (reused when the same text was already spoken by the same voice).
 export async function speak(text, voiceId, language) {
   if (!ttsReady()) throw new HttpError(503, 'Voice-over is not set up: add ELEVENLABS_API_KEY to the server settings.');

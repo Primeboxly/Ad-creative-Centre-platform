@@ -302,7 +302,7 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = ()
 }
 
 // Build options are remembered in this browser.
-const build = Object.assign({ script: '', voice: '', voiceName: '', music: 'video', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+const build = Object.assign({ script: '', voice: '', voiceName: '', music: 'product', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
 const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
 
 // Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
@@ -312,6 +312,24 @@ async function loadBuildLists() {
     state.voicesError = '';
     state.voices = await api('/api/voices').catch(e => { state.voicesError = e.message; return []; });
   }
+}
+
+// ✨ Make music: instrumental tracks for this product with ElevenLabs (they show under "AI music of this product").
+async function makeMusic(btn) {
+  const p = state.data.product;
+  const guess = p.music_style || `Upbeat modern instrumental for a short ad about "${p.name}", catchy, positive, clean`;
+  const prompt = window.prompt('Describe the music (no artist or song names). E.g. "elegant luxury pop, soft piano and strings, confident"', guess);
+  if (!prompt) return;
+  btn.disabled = true; btn.textContent = '✨ Making 2 tracks… (1-2 min)';
+  try {
+    await api('/api/music/generate', { method: 'POST', body: { prompt, count: 2, seconds: 30, product_id: p.id } });
+    state.data.product.music_style = prompt;
+    state.music = null;
+    build.music = 'product'; saveBuild();
+    toast('2 music tracks made for this product');
+    await loadBuildLists();
+  } catch (e) { fail(e); }
+  renderBuildBar();
 }
 
 // "all:sw" = every Swahili script, a number = one script, '' = clips only.
@@ -334,6 +352,14 @@ function renderBuildBar() {
   const langs = [...new Set(scripts.map(s => s.language))];
   const voices = state.voices || [];
   const tracks = state.music || [];
+  const mine = tracks.filter(m => m.product_id === state.product);       // AI music made for this product
+  const voiceOn = Boolean(sids.length && ME.tts && build.voice);
+  // The music actually used: falls back when the saved choice is not possible here.
+  let music = build.music;
+  if (music === 'product' && !mine.length) music = 'none';
+  if (music === 'video' && voiceOn) music = mine.length ? 'product' : 'none';
+  if (music === 'random' && !tracks.length) music = 'none';
+  if (/^\d+$/.test(music) && !tracks.some(m => String(m.id) === music)) music = 'none';
   bb.classList.remove('hidden');
   bb.innerHTML = `<div class="inner">
     <div class="formula"><b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}
@@ -350,11 +376,13 @@ function renderBuildBar() {
       ${ME.tts ? '<option value="__paste">✏️ Paste a voice ID…</option>' : ''}
     </select></label>
     <label class="bbf">🎵 <select id="bbMusic">
-      <option value="video" ${build.music === 'video' ? 'selected' : ''}>🎬 Music of the TikTok video</option>
-      <option value="none" ${build.music === 'none' ? 'selected' : ''}>No music</option>
-      <option value="random" ${build.music === 'random' ? 'selected' : ''} ${tracks.length ? '' : 'disabled'}>Random track (${tracks.length})</option>
-      ${tracks.map(m => `<option value="${m.id}" ${build.music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+      <option value="product" ${music === 'product' ? 'selected' : ''} ${mine.length ? '' : 'disabled'}>✨ AI music of this product (${mine.length})</option>
+      <option value="none" ${music === 'none' ? 'selected' : ''}>No music</option>
+      <option value="video" ${music === 'video' ? 'selected' : ''} ${voiceOn ? 'disabled' : ''}>🎬 Sound of the TikTok video${voiceOn ? ' (not with a voice)' : ''}</option>
+      <option value="random" ${music === 'random' ? 'selected' : ''} ${tracks.length ? '' : 'disabled'}>Random library track (${tracks.length})</option>
+      ${tracks.map(m => `<option value="${m.id}" ${music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
     </select></label>
+    ${ME.tts ? '<button class="btn sm" id="bbMakeMusic" title="Make instrumental music for this product with ElevenLabs">✨ Make music</button>' : ''}
     <label class="bbf"><input type="checkbox" id="bbCaptions" ${build.captions ? 'checked' : ''} ${sids.length && ME.captions ? '' : 'disabled'}> Captions</label>
     <button class="btn sm" id="bbClear" style="margin-left:auto">Clear</button>
     <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
@@ -372,6 +400,8 @@ function renderBuildBar() {
   };
   if (state.voicesError) $('#bbVoice').title = state.voicesError;
   $('#bbMusic').onchange = e => { build.music = e.target.value; saveBuild(); };
+  const mk = $('#bbMakeMusic');
+  if (mk) mk.onclick = () => makeMusic(mk);
   $('#bbCaptions').onchange = e => { build.captions = e.target.checked; saveBuild(); };
   $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
   if (state.voicesError && !state.voicesErrorShown) { state.voicesErrorShown = true; fail(new Error('Voices: ' + state.voicesError)); }
@@ -381,7 +411,7 @@ function renderBuildBar() {
       await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
         hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: sids,
         voice_id: sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
-        music: build.music === 'random' && !tracks.length ? 'none' : build.music, captions: build.captions } });
+        music, captions: build.captions } });
       state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
       toast(`${count} video(s) are being made`);
       location.hash = `product/${state.product}/creatives`;
@@ -550,6 +580,17 @@ async function renderMusic() {
       <div class="drop" id="musicDrop">⬆ Drop music, or a video to take its sound (mp3, m4a, wav, mp4…)<input type="file" accept="audio/*,video/*" multiple class="hidden"></div>
       <div class="progress hidden"><div></div></div>
     </div>
+    ${ME.tts ? `<form class="card" id="genMusic" style="margin-top:14px">
+      <h2>✨ Make music with AI (ElevenLabs)</h2>
+      <p class="small muted" style="margin-top:-4px">Instrumental, no voice, cleared for ads. Describe a style and a mood, without artist or song names.</p>
+      <div class="row" style="align-items:end">
+        <div style="flex:1;min-width:260px"><label class="f">Description</label>
+          <input type="text" name="prompt" required placeholder="e.g. elegant luxury pop, soft piano and strings, confident, for a watch ad"></div>
+        <div style="width:110px"><label class="f">Seconds</label><input type="number" name="seconds" min="10" max="120" value="30"></div>
+        <div style="width:100px"><label class="f">How many</label><input type="number" name="count" min="1" max="3" value="2"></div>
+        <button class="btn primary">Make</button>
+      </div>
+    </form>` : ''}
     <div class="card" style="margin-top:14px">
       ${tracks.length ? `<table class="t"><thead><tr><th>Name</th><th>Listen</th><th>Length</th><th>Used in</th><th></th></tr></thead><tbody>
         ${tracks.map(m => `<tr data-id="${m.id}">
@@ -559,6 +600,17 @@ async function renderMusic() {
           <td><button class="btn sm danger" data-del>✕</button></td></tr>`).join('')}
       </tbody></table>` : '<div class="empty">No music yet.</div>'}
     </div>`;
+  const gen = $('#genMusic');
+  if (gen) gen.onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('button', gen);
+    btn.disabled = true; btn.textContent = 'Making… (1-2 min)';
+    try {
+      const { ids } = await api('/api/music/generate', { method: 'POST', body: Object.fromEntries(new FormData(gen)) });
+      toast(`${ids.length} track(s) made`);
+      renderMusic();
+    } catch (err) { fail(err); btn.disabled = false; btn.textContent = 'Make'; }
+  };
   const d = $('#musicDrop'), input = $('input', d);
   const send = files => upload('/api/music', {}, files, d, r => `${r.added} track(s) added${r.skipped?.length ? ` · not audio: ${r.skipped.join(', ')}` : ''}`,
     r => !!r.skipped?.length, renderMusic);
