@@ -1,6 +1,6 @@
 // Voice-over with ElevenLabs: turns script text into an MP3. Each (model, voice, text) is made once and kept.
 import { createHash } from 'node:crypto';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { VOICE_DIR } from './paths.js';
 import { HttpError } from './errors.js';
@@ -90,6 +90,53 @@ export async function composeMusic(prompt, seconds = 30) {
     throw await failure(r, 'Music Generation → Access');
   }
   return Buffer.from(await r.arrayBuffer());
+}
+
+// Word times from ElevenLabs' character times. Each word of `text` takes the next characters of the alignment
+// (spaces skipped), so it works whether or not the alignment lists the spaces.
+export function wordTimes(text, alignment) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const chars = [];
+  (alignment?.characters || []).forEach((ch, i) => {
+    if (!/\s/.test(ch)) chars.push({ s: alignment.character_start_times_seconds[i], e: alignment.character_end_times_seconds[i] });
+  });
+  const out = [];
+  let k = 0;
+  for (const w of words) {
+    const n = w.length;
+    if (k + n > chars.length) return null; // the voice read the text differently: caller times words by length
+    out.push({ w, start: chars[k].s, end: chars[k + n - 1].e });
+    k += n;
+  }
+  return out;
+}
+
+// Words timed by their length over the voice, when ElevenLabs gives no usable times.
+export function evenWordTimes(text, duration, t0 = 0.05) {
+  const words = String(text).split(/\s+/).filter(Boolean);
+  const total = words.reduce((s, w) => s + w.length + 1, 0) || 1;
+  let t = t0;
+  return words.map(w => { const d = (duration - t0) * (w.length + 1) / total; const o = { w, start: t, end: t + d }; t += d; return o; });
+}
+
+// Text → { file, words } : one continuous voice-over with the time of every word (kept like speak()).
+export async function speakTimed(text, voiceId, language) {
+  if (!ttsReady()) throw new HttpError(503, 'Voice-over is not set up: add ELEVENLABS_API_KEY to the server settings.');
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return null;
+  const base = join(VOICE_DIR, createHash('sha1').update(`timed|${MODEL}|${voiceId}|${language}|${clean}`).digest('hex'));
+  const file = base + '.mp3', meta = base + '.json';
+  if (existsSync(file) && existsSync(meta)) return { file, words: JSON.parse(readFileSync(meta, 'utf8')) };
+  const body = { text: clean, model_id: MODEL };
+  if (LANG_CODE[language]) body.language_code = LANG_CODE[language];
+  const r = await fetch(`${API}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=mp3_44100_128`,
+    { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  if (!r.ok) throw await failure(r);
+  const j = await r.json();
+  writeFileSync(file, Buffer.from(j.audio_base64, 'base64'));
+  const words = wordTimes(clean, j.alignment) || null; // null → timed by length once the duration is known
+  writeFileSync(meta, JSON.stringify(words));
+  return { file, words };
 }
 
 // Text → MP3 file path (reused when the same text was already spoken by the same voice).

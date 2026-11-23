@@ -302,7 +302,7 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = ()
 }
 
 // Build options are remembered in this browser.
-const build = Object.assign({ script: '', voice: '', voiceName: '', music: 'product', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+const build = Object.assign({ style: 'bss', format: '4x5', script: '', voice: '', voiceName: '', music: 'product', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
 const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
 
 // Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
@@ -348,7 +348,8 @@ function renderBuildBar() {
   const scripts = state.data.scripts;
   const sids = chosenScripts();
   const clipsCount = Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
-  const count = clipsCount * Math.max(sids.length, 1);
+  const bss = build.style === 'bss';
+  const count = (bss ? Math.max(n('hook'), 1) * Math.max(n('cta'), 1) : clipsCount) * Math.max(sids.length, 1);
   const langs = [...new Set(scripts.map(s => s.language))];
   const voices = state.voices || [];
   const tracks = state.music || [];
@@ -362,7 +363,14 @@ function renderBuildBar() {
   if (/^\d+$/.test(music) && !tracks.some(m => String(m.id) === music)) music = 'none';
   bb.classList.remove('hidden');
   bb.innerHTML = `<div class="inner">
-    <div class="formula"><b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}
+    <label class="bbf">🎨 <select id="bbStyle">
+      <option value="bss" ${bss ? 'selected' : ''}>BSS montage</option>
+      <option value="classic" ${bss ? '' : 'selected'}>Classic</option>
+    </select></label>
+    ${bss ? `<label class="bbf"><select id="bbFormat"><option value="4x5" ${build.format === '4x5' ? 'selected' : ''}>4:5</option><option value="9x16" ${build.format === '9x16' ? 'selected' : ''}>9:16</option></select></label>` : ''}
+    <div class="formula">${bss
+      ? `<b>${n('hook')}</b> H × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''} (montage of <b>${n('body')}</b> bodies)`
+      : `<b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}`}
       = <b>${count}</b> video${count === 1 ? '' : 's'}</div>
     <label class="bbf">📝 <select id="bbScript">
       <option value="">No script (clips only)</option>
@@ -383,7 +391,7 @@ function renderBuildBar() {
       ${tracks.map(m => `<option value="${m.id}" ${music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
     </select></label>
     ${ME.tts ? '<button class="btn sm" id="bbMakeMusic" title="Make instrumental music for this product with ElevenLabs">✨ Make music</button>' : ''}
-    <label class="bbf"><input type="checkbox" id="bbCaptions" ${build.captions ? 'checked' : ''} ${sids.length && ME.captions ? '' : 'disabled'}> Captions</label>
+    ${bss ? '' : `<label class="bbf"><input type="checkbox" id="bbCaptions" ${build.captions ? 'checked' : ''} ${sids.length && ME.captions ? '' : 'disabled'}> Captions</label>`}
     <button class="btn sm" id="bbClear" style="margin-left:auto">Clear</button>
     <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
   </div>`;
@@ -402,16 +410,22 @@ function renderBuildBar() {
   $('#bbMusic').onchange = e => { build.music = e.target.value; saveBuild(); };
   const mk = $('#bbMakeMusic');
   if (mk) mk.onclick = () => makeMusic(mk);
-  $('#bbCaptions').onchange = e => { build.captions = e.target.checked; saveBuild(); };
+  const cap = $('#bbCaptions');
+  if (cap) cap.onchange = e => { build.captions = e.target.checked; saveBuild(); };
+  $('#bbStyle').onchange = e => { build.style = e.target.value; saveBuild(); renderBuildBar(); };
+  const fm = $('#bbFormat');
+  if (fm) fm.onchange = e => { build.format = e.target.value; saveBuild(); };
   $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
   if (state.voicesError && !state.voicesErrorShown) { state.voicesErrorShown = true; fail(new Error('Voices: ' + state.voicesError)); }
   $('#bbBuild').onclick = async () => {
+    if (bss && (!sids.length || !build.voice)) return fail(new Error('BSS needs a script (📝) and a voice (🎙)'));
+    if (bss && !n('body')) return fail(new Error('BSS: tick the body clips for the montage'));
     const v = voices.find(x => x.id === build.voice) || (build.voice ? { name: build.voiceName } : null);
     try {
       await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
         hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: sids,
         voice_id: sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
-        music, captions: build.captions } });
+        music, captions: build.captions, style: build.style, format: build.format } });
       state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
       toast(`${count} video(s) are being made`);
       location.hash = `product/${state.product}/creatives`;
@@ -430,6 +444,7 @@ function renderScripts() {
       ${ME.ai ? '' : '<p class="small" style="color:var(--bad)">AI is not set up on the server yet (ANTHROPIC_API_KEY). You can still add scripts by hand.</p>'}
       <div class="row" style="align-items:end">
         <div style="width:160px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div style="width:210px"><label class="f">Style</label><select name="style"><option value="bss">BSS: gift story, ~25 s, one voice</option><option value="classic">Classic: hook / body / CTA</option></select></div>
         <div style="width:110px"><label class="f">How many</label><input type="number" name="count" min="1" max="6" value="3"></div>
         <div style="flex:1;min-width:220px"><label class="f">Extra instructions (optional)</label><input type="text" name="extra" placeholder="e.g. target mothers, use a gift angle, mention 2-for-1 offer"></div>
         <button class="btn primary" ${ME.ai ? '' : 'disabled'}>Generate</button>
@@ -451,7 +466,7 @@ function renderScripts() {
     <div class="grid scripts" style="margin-top:16px">
       ${scripts.map(s => `
         <div class="card script" data-id="${s.id}">
-          <div class="row spread"><div class="chips"><span class="chip">${esc((langs[s.language] || s.language))}</span>${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
+          <div class="row spread"><div class="chips"><span class="chip">${esc((langs[s.language] || s.language))}</span>${s.style === 'bss' ? '<span class="chip win">BSS</span>' : ''}${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
             <div class="row"><button class="btn sm" data-copy>Copy</button><button class="btn sm danger" data-del>✕</button></div></div>
           <div class="part hook"><span>Hook</span><div>${esc(s.hook)}</div></div>
           <div class="part body"><span>Body</span><div>${esc(s.body)}</div></div>

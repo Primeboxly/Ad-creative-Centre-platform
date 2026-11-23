@@ -7,6 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { db } from './db.js';
 import { CLIPS_DIR, RENDERS_DIR, THUMBS_DIR, MUSIC_DIR, WORK_DIR } from './paths.js';
 import { speak } from './tts.js';
+import { renderBss } from './bss.js';
 
 const FFMPEG = process.env.FFMPEG_PATH || ffmpegPath;
 export const WIDTH = 1080, HEIGHT = 1920; // vertical: Reels, TikTok, Stories
@@ -61,7 +62,7 @@ export async function extractAudio(src, out) {
 
 // ---------- Captions ----------
 // A font that exists here: ACC_FONT, the Docker one (fonts-dejavu-core), or a Windows one.
-const FONT = [process.env.ACC_FONT, '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+export const FONT = [process.env.ACC_FONT, '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
   'C:/Windows/Fonts/arialbd.ttf', 'C:/Windows/Fonts/segoeuib.ttf'].find(f => f && existsSync(f)) || null;
 export const captionsReady = () => Boolean(FONT);
 
@@ -184,6 +185,25 @@ let busy = false;
 
 export function queueRenders() { if (!busy) next(); }
 
+// BSS style: one voice over a fast montage (server/bss.js).
+async function makeBss(c, script, workDir) {
+  if (!script) throw new Error('Its script was deleted');
+  const clip = id => {
+    const k = id && db.prepare(`SELECT * FROM clips WHERE id = ?`).get(id);
+    return k ? { file: join(CLIPS_DIR, k.file), duration: k.duration } : null;
+  };
+  let pool = [];
+  try { pool = JSON.parse(c.body_pool || '[]'); } catch {}
+  const clips = { hook: [clip(c.hook_clip)].filter(Boolean), body: pool.map(clip).filter(Boolean), cta: [clip(c.cta_clip)].filter(Boolean) };
+  if (!clips.hook.length && !clips.body.length && !clips.cta.length) throw new Error('Its clips were deleted');
+  const music = c.music_id ? db.prepare(`SELECT file FROM music WHERE id = ?`).get(c.music_id) : null;
+  const name = `creative-${c.id}.mp4`, out = join(RENDERS_DIR, name);
+  const total = await renderBss({ clips, script, voiceId: c.voice_id, music: music ? join(MUSIC_DIR, music.file) : null,
+    format: c.format, seed: c.id, workDir, out });
+  await thumbnail(out, thumbOf('creative', c.id));
+  db.prepare(`UPDATE creatives SET render = 'ready', file = ?, duration = ? WHERE id = ?`).run(name, total, c.id);
+}
+
 async function next() {
   const c = db.prepare(`SELECT * FROM creatives WHERE render = 'queued' ORDER BY id LIMIT 1`).get();
   if (!c) { busy = false; return; }
@@ -193,6 +213,7 @@ async function next() {
   try {
     const script = c.script_id ? db.prepare(`SELECT * FROM scripts WHERE id = ?`).get(c.script_id) : null;
     const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(c.product_id);
+    if (c.style === 'bss') { await makeBss(c, script, workDir); return; }
     const parts = [];
     for (const [kind, id] of [['hook', c.hook_clip], ['body', c.body_clip], ['cta', c.cta_clip]]) {
       const k = id && db.prepare(`SELECT * FROM clips WHERE id = ?`).get(id);
@@ -221,8 +242,8 @@ async function next() {
     db.prepare(`UPDATE creatives SET render = 'failed', error = ? WHERE id = ?`).run(String(e.message).slice(0, 500), c.id);
   } finally {
     rmSync(workDir, { recursive: true, force: true });
+    setImmediate(next); // also after the early return of a BSS video
   }
-  next();
 }
 
 // A server restart in the middle of a render: start it again.

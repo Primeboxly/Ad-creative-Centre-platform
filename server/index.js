@@ -277,16 +277,17 @@ app.delete('/api/raws/:id', (req, res) => {
 });
 
 // ---------- Scripts ----------
-const insertScript = (pid, uid, lang, s) => db.prepare(`
-  INSERT INTO scripts (product_id, language, angle, hook, body, cta, primary_text, headline, created_by) VALUES (?,?,?,?,?,?,?,?,?)`)
-  .run(pid, lang, str(s.angle, 80), str(s.hook), str(s.body, 4000), str(s.cta), str(s.primary_text, 4000), str(s.headline, 200), uid).lastInsertRowid;
+const insertScript = (pid, uid, lang, s, style = 'classic') => db.prepare(`
+  INSERT INTO scripts (product_id, language, angle, hook, body, cta, primary_text, headline, created_by, style) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+  .run(pid, lang, str(s.angle, 80), str(s.hook), str(s.body, 4000), str(s.cta), str(s.primary_text, 4000), str(s.headline, 200), uid, style).lastInsertRowid;
 
 app.post('/api/products/:id/scripts/generate', h(async (req, res) => {
   const p = productOr404(idParam(req.params.id));
   if (!aiReady()) throw new HttpError(503, 'AI is not set up: add ANTHROPIC_API_KEY to the server settings.');
   const { language = 'en', count = 3, extra = '' } = req.body || {};
-  const scripts = await writeScripts({ product: p.name, notes: p.notes, language, count, extra: str(extra, 1000) });
-  const ids = tx(() => scripts.map(s => insertScript(p.id, req.user.id, language, s)));
+  const style = req.body?.style === 'bss' ? 'bss' : 'classic';
+  const scripts = await writeScripts({ product: p.name, notes: p.notes, language, count, extra: str(extra, 1000), style });
+  const ids = tx(() => scripts.map(s => insertScript(p.id, req.user.id, language, s, style)));
   res.status(201).json({ ids });
 }));
 
@@ -348,18 +349,25 @@ app.post('/api/products/:id/creatives', (req, res) => {
     if (musicChoice === 'random') return pickFrom('all', tracks);
     return Number(musicChoice);
   };
+  // Style: 'classic' = every hook × body × CTA; 'bss' = every hook × CTA, the body is a montage of all ticked bodies.
+  const style = req.body?.style === 'bss' ? 'bss' : 'classic';
+  const format = ['4x5', '9x16'].includes(req.body?.format) ? req.body.format : style === 'bss' ? '4x5' : '9x16';
+  if (style === 'bss' && (!scriptIds.length || !voiceId)) throw new HttpError(400, 'The BSS style needs a script and a voice');
+  const bodyPool = style === 'bss' ? JSON.stringify(bodies.filter(Boolean)) : '';
   const combos = [];
-  for (const hk of hooks) for (const b of bodies) for (const c of ctas) if (hk || b || c)
-    for (const sid of scriptIds.length ? scriptIds : [null]) combos.push([hk, b, c, sid]);
+  for (const hk of hooks) for (const b of style === 'bss' ? [null] : bodies) for (const c of ctas)
+    if (hk || b || c || (style === 'bss' && bodyPool !== '[]'))
+      for (const sid of scriptIds.length ? scriptIds : [null]) combos.push([hk, b, c, sid]);
   if (!combos.length) throw new HttpError(400, 'Pick at least one clip');
   if (combos.length > MAX_COMBOS) throw new HttpError(400, `${combos.length} videos is too many at once (max ${MAX_COMBOS})`);
   const ids = tx(() => combos.map(([hk, b, c, sid]) => {
-    const name = [hk && `H${hk}`, b && `B${b}`, c && `C${c}`, sid && `S${sid}`].filter(Boolean).join(' + ');
-    const music = musicFor(hk, b, c);
+    const name = [style === 'bss' && 'BSS', hk && `H${hk}`, b && `B${b}`, c && `C${c}`, sid && `S${sid}`].filter(Boolean).join(' + ');
+    const music = musicFor(hk, b ?? bodies.find(Boolean) ?? null, c);
     const clipSound = 0; // clips' own sound never goes under a voice-over (it often has someone speaking)
-    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id, captions, clip_sound)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', music, captions, clipSound).lastInsertRowid;
+    return db.prepare(`INSERT INTO creatives (product_id, hook_clip, body_clip, cta_clip, script_id, name, created_by, voice_id, voice_name, music_id,
+      captions, clip_sound, style, format, body_pool) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(p.id, hk, b, c, sid, name, req.user.id, sid ? voiceId : '', sid ? voiceName : '', music,
+        style === 'bss' ? 1 : captions, clipSound, style, format, bodyPool).lastInsertRowid;
   }));
   queueRenders();
   res.status(201).json({ ids });

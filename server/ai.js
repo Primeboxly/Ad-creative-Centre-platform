@@ -45,12 +45,20 @@ const SCHEMA = {
 
 export const aiReady = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 
-export async function writeScripts({ product, notes, language, count, extra }) {
+// The BSS style (docs/style-bss-watch.md): one continuous voice-over of a 23-27 s montage ad.
+const BSS_STYLE = `Write in the "BSS" style: one warm, persuasive voice reads the whole script without a break, over a fast montage of close-up shots.
+- Total 55-70 words (about 23-27 seconds read aloud). Hook + body + cta must read as ONE flowing text.
+- hook (8-14 words): a question or problem about finding the right gift or solution, e.g. "Struggling to find the perfect gift that will leave her speechless?"
+- body (35-45 words): first dismiss the usual option ("Skip the generic presents and surprise her with…"), then 2-3 concrete details of the product as sensory phrases, then the feeling it gives ("she'll fall in love with it", "feel special every time she wears it"), then occasions or uses ("birthdays, anniversaries, or just to show how much she means to you").
+- cta (10-15 words): order now and pay cash on delivery, with a soft urgency (limited stock) if it fits; no "tap the link".
+- Short, natural spoken sentences; words that sound good read aloud; no lists, no emojis in hook/body/cta.`;
+
+export async function writeScripts({ product, notes, language, count, extra, style = 'classic' }) {
   if (!LANGUAGES[language]) throw new HttpError(400, 'Unknown language');
   const n = Math.min(Math.max(Number(count) || 3, 1), 6);
   const user = `Product: ${product}
 Product notes (benefits, audience, price, offer): ${notes || '(none: work from the product name)'}
-${extra ? `Extra instructions from the team: ${extra}\n` : ''}
+${extra ? `Extra instructions from the team: ${extra}\n` : ''}${style === 'bss' ? `\n${BSS_STYLE}\n` : ''}
 Write ${n} different scripts in ${LANGUAGES[language]}.`;
 
   let res;

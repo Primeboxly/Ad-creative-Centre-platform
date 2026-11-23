@@ -111,6 +111,10 @@ addColumn('creatives', 'clip_sound', 'INTEGER NOT NULL DEFAULT 0'); // keep the 
 addColumn('music', 'product_id', 'INTEGER REFERENCES products(id) ON DELETE SET NULL'); // AI music made for this product
 addColumn('music', 'prompt', "TEXT NOT NULL DEFAULT ''");          // the description it was made from (AI music)
 addColumn('products', 'music_style', "TEXT NOT NULL DEFAULT ''");  // last music description used for the product
+addColumn('creatives', 'style', "TEXT NOT NULL DEFAULT 'classic'"); // 'classic' (hook+body+CTA clips) or 'bss' (montage, docs/style-bss-watch.md)
+addColumn('creatives', 'format', "TEXT NOT NULL DEFAULT '9x16'");   // '9x16' or '4x5'
+addColumn('creatives', 'body_pool', "TEXT NOT NULL DEFAULT ''");    // bss: ids of all the body clips the montage uses (JSON)
+addColumn('scripts', 'style', "TEXT NOT NULL DEFAULT 'classic'");   // how the AI wrote it
 
 export function tx(fn) {
   db.exec('BEGIN');
