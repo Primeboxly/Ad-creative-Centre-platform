@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ad creative Centre</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Sign in / first setup -->
+  <section id="auth" class="auth hidden">
+    <form class="card" id="authForm">
+      <h1><b>AC</b> Ad creative Centre</h1>
+      <p class="muted" id="authHint">Sign in to your team's creative library.</p>
+      <div id="setupName" class="hidden">
+        <label class="f">Your name</label><input type="text" name="name" autocomplete="name">
+      </div>
+      <label class="f">Email</label><input type="email" name="email" required autocomplete="username">
+      <label class="f">Password</label><input type="password" name="password" required minlength="8" autocomplete="current-password">
+      <p id="authErr" class="small" style="color:var(--bad)"></p>
+      <button class="btn primary" style="width:100%" id="authBtn">Sign in</button>
+    </form>
+  </section>
+
+  <!-- App -->
+  <section id="app" class="hidden">
+    <header class="top">
+      <div class="brand" data-go="products"><b>AC</b> Ad creative Centre</div>
+      <nav>
+        <a data-go="products">Products</a>
+        <a data-go="team" id="navTeam" class="hidden">Team</a>
+      </nav>
+      <div class="me"><span id="meName"></span><button class="btn sm" id="logout">Sign out</button></div>
+    </header>
+    <main id="view"></main>
+  </section>
+
+  <div id="buildbar" class="buildbar hidden"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

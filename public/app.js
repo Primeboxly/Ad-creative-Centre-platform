@@ -1,0 +1,474 @@
+// Ad creative Centre: one page app (products → footage, scripts, creatives; team).
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const KINDS = { hook: 'Hook', body: 'Body', cta: 'Call to action' };
+const KIND_HINT = {
+  hook: 'First 2-3 seconds: the scroll-stopper.',
+  body: 'The demo: problem → product → benefits.',
+  cta: 'End: order now, pay on delivery.',
+};
+const STATUS_LABEL = { draft: 'Draft', testing: 'Testing', winner: 'Winner 🏆', loser: 'Loser' };
+const fmtDur = s => { s = Math.round(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+let ME = null;
+const state = { view: 'products', product: null, tab: 'footage', sel: { hook: new Set(), body: new Set(), cta: new Set() }, poll: null };
+
+async function api(path, opts = {}) {
+  const o = { method: opts.method || 'GET', headers: {} };
+  if (opts.body !== undefined) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(opts.body); }
+  const r = await fetch(path, o);
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.startsWith('/api/auth')) { showAuth(); throw new Error('Not signed in'); }
+  if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+  return data;
+}
+
+function toast(msg, err = false) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (err ? ' err' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), err ? 5000 : 2500);
+}
+const fail = e => toast(e.message, true);
+
+// ---------- Sign in ----------
+let setupMode = false;
+async function showAuth() {
+  $('#app').classList.add('hidden');
+  $('#buildbar').classList.add('hidden');
+  $('#auth').classList.remove('hidden');
+  const { needed } = await api('/api/auth/setup');
+  setupMode = needed;
+  $('#setupName').classList.toggle('hidden', !needed);
+  $('#authHint').textContent = needed ? 'First start: create the admin account.' : "Sign in to your team's creative library.";
+  $('#authBtn').textContent = needed ? 'Create admin account' : 'Sign in';
+}
+
+$('#authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  $('#authErr').textContent = '';
+  try {
+    await api(setupMode ? '/api/auth/setup' : '/api/auth/login', { method: 'POST', body: Object.fromEntries(f) });
+    start();
+  } catch (err) { $('#authErr').textContent = err.message; }
+});
+
+$('#logout').addEventListener('click', async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => {}); showAuth(); });
+
+document.addEventListener('click', e => {
+  const go = e.target.closest('[data-go]');
+  if (go) { location.hash = go.dataset.go; }
+});
+window.addEventListener('hashchange', route);
+
+async function start() {
+  try { ME = await api('/api/me'); } catch { return; }
+  $('#auth').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  $('#meName').textContent = `${ME.user.name} · ${ME.user.role}`;
+  $('#navTeam').classList.toggle('hidden', ME.user.role !== 'admin');
+  route();
+}
+
+function route() {
+  clearInterval(state.poll);
+  $('#buildbar').classList.add('hidden');
+  const [view, id, tab] = (location.hash.slice(1) || 'products').split('/');
+  document.querySelectorAll('header nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
+  if (view === 'team' && ME.user.role === 'admin') return renderTeam();
+  if (view === 'product' && id) { state.tab = tab || 'footage'; return renderProduct(Number(id)); }
+  renderProducts();
+}
+
+// ---------- Products ----------
+async function renderProducts() {
+  const v = $('#view');
+  const list = await api('/api/products').catch(fail) || [];
+  v.innerHTML = `
+    <div class="row spread">
+      <div><h1>Products</h1><div class="muted">One collection per product: put its footage in, get ad videos out.</div></div>
+      <button class="btn primary" id="newProduct">+ New product</button>
+    </div>
+    <form id="newForm" class="card hidden" style="margin-top:14px">
+      <h2>New product</h2>
+      <label class="f">Product name</label><input type="text" name="name" required placeholder="e.g. Digital Laser Distance Meter 60m">
+      <label class="f">Notes for the AI: benefits, who buys it, price, offer (optional)</label>
+      <textarea name="notes" placeholder="Measures up to 60 m in one click, ±2 mm. For builders, tilers, painters. 45 USD, 2 for 90 USD. Pay on delivery."></textarea>
+      <div class="row" style="margin-top:10px"><button class="btn primary">Create</button><button type="button" class="btn" id="cancelNew">Cancel</button></div>
+    </form>
+    <div class="grid products">
+      ${list.map(p => `
+        <div class="card product" data-id="${p.id}">
+          <div class="cover" ${p.cover_clip ? `style="background-image:url('/media/thumb/clip/${p.cover_clip}')"` : ''}>${p.cover_clip ? '' : '🎬'}</div>
+          <div class="info">
+            <div class="name">${esc(p.name)}</div>
+            <div class="chips">
+              <span class="chip hook">${p.hooks} hooks</span><span class="chip body">${p.bodies} bodies</span><span class="chip cta">${p.ctas} CTAs</span>
+              <span class="chip">${p.scripts} scripts</span><span class="chip">${p.creatives} videos</span>
+              ${p.winners ? `<span class="chip win">${p.winners} winners</span>` : ''}
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>
+    ${list.length ? '' : '<div class="empty card" style="margin-top:16px">No product yet. Click <b>+ New product</b> to create the first collection.</div>'}`;
+  $('#newProduct').onclick = () => { $('#newForm').classList.remove('hidden'); $('#newForm [name=name]').focus(); };
+  $('#cancelNew').onclick = () => $('#newForm').classList.add('hidden');
+  $('#newForm').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const { id } = await api('/api/products', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      location.hash = `product/${id}`;
+    } catch (err) { fail(err); }
+  };
+  v.querySelectorAll('.product').forEach(c => c.onclick = () => { location.hash = `product/${c.dataset.id}`; });
+}
+
+// ---------- One product ----------
+async function loadProduct(id) {
+  state.data = await api(`/api/products/${id}`);
+  if (state.product !== id) { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; state.product = id; }
+  // Forget selected clips that were deleted.
+  const ids = new Set(state.data.clips.map(c => c.id));
+  for (const k in state.sel) for (const x of state.sel[k]) if (!ids.has(x)) state.sel[k].delete(x);
+}
+
+async function renderProduct(id) {
+  try { await loadProduct(id); } catch (e) { fail(e); location.hash = 'products'; return; }
+  const { product: p, clips, scripts, creatives } = state.data;
+  const v = $('#view');
+  v.innerHTML = `
+    <span class="back" data-go="products">← All products</span>
+    <div class="row spread">
+      <h1>${esc(p.name)}</h1>
+      ${ME.user.role === 'admin' ? '<button class="btn sm danger" id="delProduct">Delete product</button>' : ''}
+    </div>
+    <div class="notes">
+      <textarea id="notes" placeholder="Notes for the AI: benefits, who buys it, price, offer…">${esc(p.notes)}</textarea>
+      <button class="btn" id="saveNotes">Save notes</button>
+    </div>
+    <div class="tabs">
+      <a data-tab="footage">Footage (${clips.length})</a>
+      <a data-tab="scripts">Scripts (${scripts.length})</a>
+      <a data-tab="creatives">Creatives (${creatives.length})</a>
+    </div>
+    <div id="tab"></div>`;
+  v.querySelectorAll('.tabs a').forEach(a => {
+    a.classList.toggle('on', a.dataset.tab === state.tab);
+    a.onclick = () => { location.hash = `product/${id}/${a.dataset.tab}`; };
+  });
+  $('#saveNotes').onclick = async () => {
+    try { await api(`/api/products/${id}`, { method: 'PATCH', body: { notes: $('#notes').value } }); toast('Notes saved'); } catch (e) { fail(e); }
+  };
+  const del = $('#delProduct');
+  if (del) del.onclick = async () => {
+    if (!confirm(`Delete "${p.name}" with all its footage, scripts and videos? This cannot be undone.`)) return;
+    try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; } catch (e) { fail(e); }
+  };
+  ({ footage: renderFootage, scripts: renderScripts, creatives: renderCreatives }[state.tab] || renderFootage)();
+}
+
+// Footage: three lanes (hook / body / CTA), upload, select clips to build videos.
+function renderFootage() {
+  const { clips } = state.data;
+  const t = $('#tab');
+  t.innerHTML = `
+    <p class="muted" style="margin-top:0">Put the footage of this product in the right lane (your TikTok downloads, phone videos, supplier videos).
+    Tick clips in each lane, then <b>Build videos</b>: every hook × body × CTA you ticked becomes one ad.</p>
+    <div class="grid lanes">
+      ${Object.keys(KINDS).map(k => `
+        <div class="card lane" data-kind="${k}">
+          <h2><span class="dot" style="background:var(--${k})"></span>${KINDS[k]} <span class="muted small">(${clips.filter(c => c.kind === k).length})</span>
+            <button class="btn sm" style="margin-left:auto" data-all="${k}">Tick all</button></h2>
+          <div class="hint">${KIND_HINT[k]}</div>
+          <div class="drop" data-kind="${k}">⬆ Drop videos here or click to upload<input type="file" accept="video/*" multiple class="hidden"></div>
+          <div class="progress hidden"><div></div></div>
+          <div class="clips">
+            ${clips.filter(c => c.kind === k).map(c => `
+              <div class="clip ${state.sel[k].has(c.id) ? 'sel' : ''}" data-id="${c.id}">
+                <input type="checkbox" class="tick" ${state.sel[k].has(c.id) ? 'checked' : ''}>
+                <span class="dur">${fmtDur(c.duration)}${c.has_audio ? '' : ' 🔇'}</span>
+                <img src="/media/thumb/clip/${c.id}" alt="" data-play="/media/clip/${c.id}" loading="lazy">
+                <div class="bar">
+                  <input type="text" value="${esc(c.label)}" data-label title="Clip name">
+                  <div class="row">
+                    <select data-kind title="Move to">${Object.keys(KINDS).map(x => `<option value="${x}" ${x === c.kind ? 'selected' : ''}>${x.toUpperCase()}</option>`).join('')}</select>
+                    <button class="btn sm danger" data-del title="Delete">✕</button>
+                  </div>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  t.querySelectorAll('.drop').forEach(d => {
+    const input = $('input', d);
+    d.onclick = e => { if (e.target !== input) input.click(); };
+    input.onchange = () => uploadClips(d.dataset.kind, input.files, d);
+    d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
+    d.ondragleave = () => d.classList.remove('over');
+    d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); uploadClips(d.dataset.kind, e.dataTransfer.files, d); };
+  });
+  t.querySelectorAll('[data-all]').forEach(b => b.onclick = () => {
+    const k = b.dataset.all, all = state.data.clips.filter(c => c.kind === k).map(c => c.id);
+    const every = all.every(id => state.sel[k].has(id));
+    state.sel[k] = new Set(every ? [] : all);
+    renderFootage();
+  });
+  t.querySelectorAll('.clip').forEach(el => {
+    const id = Number(el.dataset.id), kind = el.closest('.lane').dataset.kind;
+    $('.tick', el).onchange = e => {
+      e.target.checked ? state.sel[kind].add(id) : state.sel[kind].delete(id);
+      el.classList.toggle('sel', e.target.checked);
+      renderBuildBar();
+    };
+    $('[data-label]', el).onchange = e => api(`/api/clips/${id}`, { method: 'PATCH', body: { label: e.target.value } }).catch(fail);
+    $('[data-kind]', el).onchange = async e => {
+      try { await api(`/api/clips/${id}`, { method: 'PATCH', body: { kind: e.target.value } }); state.sel[kind].delete(id); renderProduct(state.product); } catch (err) { fail(err); }
+    };
+    $('[data-del]', el).onclick = async () => {
+      if (!confirm('Delete this clip?')) return;
+      try { await api(`/api/clips/${id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
+    };
+  });
+  t.querySelectorAll('[data-play]').forEach(img => img.onclick = () => play(img.dataset.play));
+  renderBuildBar();
+}
+
+function uploadClips(kind, files, drop) {
+  if (!files?.length) return;
+  const fd = new FormData();
+  fd.append('kind', kind);
+  for (const f of files) fd.append('files', f);
+  const bar = drop.nextElementSibling;
+  bar.classList.remove('hidden');
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/products/${state.product}/clips`);
+  xhr.upload.onprogress = e => { if (e.lengthComputable) $('div', bar).style.width = `${(e.loaded / e.total) * 100}%`; };
+  xhr.onload = () => {
+    const r = JSON.parse(xhr.responseText || '{}');
+    if (xhr.status >= 300) return fail(new Error(r.error || 'Upload failed')), bar.classList.add('hidden');
+    toast(`${r.added} clip(s) added${r.skipped?.length ? ` · not a video: ${r.skipped.join(', ')}` : ''}`, !!r.skipped?.length);
+    renderProduct(state.product);
+  };
+  xhr.onerror = () => { fail(new Error('Upload failed: check your connection')); bar.classList.add('hidden'); };
+  xhr.send(fd);
+}
+
+function renderBuildBar() {
+  const bb = $('#buildbar');
+  const n = k => state.sel[k].size;
+  const count = Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
+  const any = n('hook') + n('body') + n('cta') > 0;
+  if (state.tab !== 'footage' || !any) return bb.classList.add('hidden');
+  const scripts = state.data.scripts;
+  bb.classList.remove('hidden');
+  bb.innerHTML = `<div class="inner">
+    <div class="formula"><b>${n('hook')}</b> hook${n('hook') === 1 ? '' : 's'} × <b>${n('body')}</b> bod${n('body') === 1 ? 'y' : 'ies'} × <b>${n('cta')}</b> CTA${n('cta') === 1 ? '' : 's'}
+      = <b>${count}</b> video${count === 1 ? '' : 's'}</div>
+    ${scripts.length ? `<select id="bbScript"><option value="">No script linked</option>${scripts.map(s =>
+      `<option value="${s.id}">${esc(s.language.toUpperCase())} · ${esc(s.angle || 'script')} · ${esc(s.hook.slice(0, 50))}</option>`).join('')}</select>` : ''}
+    <button class="btn sm" id="bbClear" style="margin-left:auto">Clear</button>
+    <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
+  </div>`;
+  $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
+  $('#bbBuild').onclick = async () => {
+    try {
+      await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
+        hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_id: $('#bbScript')?.value || null } });
+      state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
+      toast(`${count} video(s) are being made`);
+      location.hash = `product/${state.product}/creatives`;
+    } catch (e) { fail(e); }
+  };
+}
+
+// Scripts: AI writer + list.
+function renderScripts() {
+  const { scripts } = state.data;
+  const langs = ME.languages;
+  const t = $('#tab');
+  t.innerHTML = `
+    <form class="card" id="genForm">
+      <h2>✨ Write scripts with AI</h2>
+      ${ME.ai ? '' : '<p class="small" style="color:var(--bad)">AI is not set up on the server yet (ANTHROPIC_API_KEY). You can still add scripts by hand.</p>'}
+      <div class="row" style="align-items:end">
+        <div style="width:160px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div style="width:110px"><label class="f">How many</label><input type="number" name="count" min="1" max="6" value="3"></div>
+        <div style="flex:1;min-width:220px"><label class="f">Extra instructions (optional)</label><input type="text" name="extra" placeholder="e.g. target mothers, use a gift angle, mention 2-for-1 offer"></div>
+        <button class="btn primary" ${ME.ai ? '' : 'disabled'}>Generate</button>
+      </div>
+      <p class="small muted" style="margin-bottom:0">The AI uses the product name and the notes above. Each script = hook + body + CTA + post text + headline.</p>
+    </form>
+    <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">✍️ Add a script by hand</summary>
+      <form id="manForm">
+        <div class="row"><div style="width:160px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div style="flex:1"><label class="f">Angle</label><input type="text" name="angle" placeholder="e.g. testimonial"></div></div>
+        <label class="f">Hook</label><textarea name="hook" required></textarea>
+        <label class="f">Body</label><textarea name="body" required></textarea>
+        <label class="f">Call to action</label><textarea name="cta" required></textarea>
+        <label class="f">Post text (optional)</label><textarea name="primary_text"></textarea>
+        <label class="f">Headline (optional)</label><input type="text" name="headline">
+        <button class="btn primary" style="margin-top:10px">Save script</button>
+      </form>
+    </details>
+    <div class="grid scripts" style="margin-top:16px">
+      ${scripts.map(s => `
+        <div class="card script" data-id="${s.id}">
+          <div class="row spread"><div class="chips"><span class="chip">${esc((langs[s.language] || s.language))}</span>${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
+            <div class="row"><button class="btn sm" data-copy>Copy</button><button class="btn sm danger" data-del>✕</button></div></div>
+          <div class="part hook"><span>Hook</span><div>${esc(s.hook)}</div></div>
+          <div class="part body"><span>Body</span><div>${esc(s.body)}</div></div>
+          <div class="part cta"><span>CTA</span><div>${esc(s.cta)}</div></div>
+          ${s.primary_text || s.headline ? `<details><summary>Ad copy</summary>${s.headline ? `<div style="margin-top:6px"><b>${esc(s.headline)}</b></div>` : ''}<pre>${esc(s.primary_text)}</pre></details>` : ''}
+          <div class="small muted" style="margin-top:8px">${esc(s.author || '')} · ${esc(s.created_at.slice(0, 16))}</div>
+        </div>`).join('')}
+    </div>
+    ${scripts.length ? '' : '<div class="empty">No script yet.</div>'}`;
+
+  $('#genForm').onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('button', e.target);
+    btn.disabled = true; btn.textContent = 'Writing… (up to a minute)';
+    try {
+      const { ids } = await api(`/api/products/${state.product}/scripts/generate`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      toast(`${ids.length} script(s) written`);
+      renderProduct(state.product);
+    } catch (err) { fail(err); btn.disabled = false; btn.textContent = 'Generate'; }
+  };
+  $('#manForm').onsubmit = async e => {
+    e.preventDefault();
+    try { await api(`/api/products/${state.product}/scripts`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); renderProduct(state.product); } catch (err) { fail(err); }
+  };
+  t.querySelectorAll('.script').forEach(el => {
+    const s = scripts.find(x => x.id === Number(el.dataset.id));
+    $('[data-copy]', el).onclick = () => {
+      const txt = `HOOK:\n${s.hook}\n\nBODY:\n${s.body}\n\nCTA:\n${s.cta}${s.headline ? `\n\nHEADLINE:\n${s.headline}` : ''}${s.primary_text ? `\n\nPOST TEXT:\n${s.primary_text}` : ''}`;
+      navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => fail(new Error('Copy failed')));
+    };
+    $('[data-del]', el).onclick = async () => {
+      if (!confirm('Delete this script?')) return;
+      try { await api(`/api/scripts/${s.id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
+    };
+  });
+}
+
+// Creatives: finished videos, their state, status and download.
+function renderCreatives() {
+  const { creatives, scripts, clips } = state.data;
+  const clipName = id => clips.find(c => c.id === id)?.label || (id ? `#${id}` : '');
+  const t = $('#tab');
+  const filter = state.filter || 'all';
+  const list = creatives.filter(c => filter === 'all' || c.status === filter);
+  t.innerHTML = `
+    <div class="row spread" style="margin-bottom:14px">
+      <div class="row">${['all', ...ME.statuses].map(s => `<button class="btn sm ${filter === s ? 'dark' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABEL[s]}</button>`).join('')}</div>
+      <span class="muted small">Build new videos from the Footage tab.</span>
+    </div>
+    <div class="grid creatives">
+      ${list.map(c => {
+        const s = scripts.find(x => x.id === c.script_id);
+        const media = c.render === 'ready'
+          ? `<video src="/media/creative/${c.id}" poster="/media/thumb/creative/${c.id}" controls preload="none" playsinline></video>`
+          : c.render === 'failed' ? `<div style="padding:14px;text-align:center"><div style="color:#ff8a7a">Failed</div><div class="small" style="margin:6px 0">${esc(c.error).slice(0, 160)}</div><button class="btn sm" data-retry>Try again</button></div>`
+          : `<div style="text-align:center"><div class="spin" style="margin:0 auto 8px"></div>${c.render === 'rendering' ? 'Making video…' : 'Waiting…'}</div>`;
+        return `<div class="card creative" data-id="${c.id}">
+          <div class="media">${media}</div>
+          <div class="meta">
+            <input type="text" value="${esc(c.name)}" data-name title="Name">
+            <div class="small muted">${[c.hook_clip && `Hook: ${esc(clipName(c.hook_clip))}`, c.body_clip && `Body: ${esc(clipName(c.body_clip))}`, c.cta_clip && `CTA: ${esc(clipName(c.cta_clip))}`].filter(Boolean).join('<br>')}</div>
+            ${s ? `<div class="small" title="${esc(s.hook + '\n\n' + s.body + '\n\n' + s.cta)}">📝 ${esc(s.language.toUpperCase())} · ${esc(s.hook.slice(0, 60))}</div>` : ''}
+            <div class="row" style="flex-wrap:nowrap">
+              <select data-status class="status-${c.status}">${ME.statuses.map(x => `<option value="${x}" ${x === c.status ? 'selected' : ''}>${STATUS_LABEL[x]}</option>`).join('')}</select>
+              ${c.render === 'ready' ? `<a class="btn sm" href="/media/creative/${c.id}?download=1" title="Download">⬇</a>` : ''}
+              <button class="btn sm danger" data-del title="Delete">✕</button>
+            </div>
+            <div class="small muted">${c.render === 'ready' ? fmtDur(c.duration) + ' · ' : ''}${esc(c.author || '')}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ${list.length ? '' : `<div class="empty">${creatives.length ? 'No video with this status.' : 'No video yet. Go to <b>Footage</b>, tick hooks, bodies and CTAs, then click <b>Build</b>.'}</div>`}`;
+
+  t.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => { state.filter = b.dataset.filter; renderCreatives(); });
+  t.querySelectorAll('.creative').forEach(el => {
+    const id = Number(el.dataset.id);
+    $('[data-name]', el).onchange = e => api(`/api/creatives/${id}`, { method: 'PATCH', body: { name: e.target.value } }).catch(fail);
+    $('[data-status]', el).onchange = async e => {
+      try { await api(`/api/creatives/${id}`, { method: 'PATCH', body: { status: e.target.value } }); e.target.className = `status-${e.target.value}`; } catch (err) { fail(err); }
+    };
+    $('[data-del]', el).onclick = async () => {
+      if (!confirm('Delete this video?')) return;
+      try { await api(`/api/creatives/${id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
+    };
+    const retry = $('[data-retry]', el);
+    if (retry) retry.onclick = async () => { try { await api(`/api/creatives/${id}/retry`, { method: 'POST' }); renderProduct(state.product); } catch (err) { fail(err); } };
+  });
+
+  // While videos are being made, check every 3 seconds.
+  clearInterval(state.poll);
+  if (creatives.some(c => c.render === 'queued' || c.render === 'rendering')) {
+    state.poll = setInterval(async () => {
+      if (state.tab !== 'creatives' || !location.hash.startsWith(`#product/${state.product}`)) return clearInterval(state.poll);
+      const before = JSON.stringify(state.data.creatives.map(c => c.render));
+      await loadProduct(state.product).catch(() => {});
+      if (JSON.stringify(state.data.creatives.map(c => c.render)) !== before) renderCreatives();
+    }, 3000);
+  }
+}
+
+function play(src) {
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<video src="${src}" controls autoplay playsinline></video>`;
+  m.onclick = e => { if (e.target === m) m.remove(); };
+  document.addEventListener('keydown', function k(e) { if (e.key === 'Escape') { m.remove(); document.removeEventListener('keydown', k); } });
+  document.body.appendChild(m);
+}
+
+// ---------- Team ----------
+async function renderTeam() {
+  const v = $('#view');
+  const users = await api('/api/users').catch(fail) || [];
+  v.innerHTML = `
+    <h1>Team</h1><p class="muted">Admins can manage the team and delete products. Members do everything else.</p>
+    <div class="card">
+      <table class="t"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>
+      ${users.map(u => `<tr data-id="${u.id}">
+        <td>${esc(u.name)}</td><td>${esc(u.email)}</td>
+        <td><select data-role ${u.id === ME.user.id ? 'disabled' : ''}><option value="member" ${u.role === 'member' ? 'selected' : ''}>Member</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option></select></td>
+        <td>${u.active ? 'Active' : '<span style="color:var(--bad)">Disabled</span>'}</td>
+        <td class="row" style="justify-content:flex-end">
+          <button class="btn sm" data-pw>New password</button>
+          ${u.id === ME.user.id ? '' : `<button class="btn sm ${u.active ? 'danger' : ''}" data-toggle>${u.active ? 'Disable' : 'Enable'}</button>`}
+        </td></tr>`).join('')}
+      </tbody></table>
+    </div>
+    <form class="card" id="addUser" style="margin-top:14px">
+      <h2>Add a team member</h2>
+      <div class="row" style="align-items:end">
+        <div style="flex:1;min-width:160px"><label class="f">Name</label><input type="text" name="name" required></div>
+        <div style="flex:1;min-width:200px"><label class="f">Email</label><input type="email" name="email" required></div>
+        <div style="flex:1;min-width:160px"><label class="f">Password (8+)</label><input type="text" name="password" required minlength="8"></div>
+        <div style="width:130px"><label class="f">Role</label><select name="role"><option value="member">Member</option><option value="admin">Admin</option></select></div>
+        <button class="btn primary">Add</button>
+      </div>
+    </form>`;
+  $('#addUser').onsubmit = async e => {
+    e.preventDefault();
+    try { await api('/api/users', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); toast('Account created'); renderTeam(); } catch (err) { fail(err); }
+  };
+  v.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = Number(tr.dataset.id), u = users.find(x => x.id === id);
+    $('[data-role]', tr).onchange = e => api(`/api/users/${id}`, { method: 'PATCH', body: { role: e.target.value } }).then(() => toast('Role changed'), fail);
+    const tg = $('[data-toggle]', tr);
+    if (tg) tg.onclick = () => api(`/api/users/${id}`, { method: 'PATCH', body: { active: !u.active } }).then(renderTeam, fail);
+    $('[data-pw]', tr).onclick = () => {
+      const pw = prompt(`New password for ${u.name} (8 characters minimum):`);
+      if (pw) api(`/api/users/${id}`, { method: 'PATCH', body: { password: pw } }).then(() => toast('Password changed'), fail);
+    };
+  });
+}
+
+start().catch(() => {});

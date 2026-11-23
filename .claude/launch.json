@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ad-creative-centre",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/index.js"],
+      "port": 3100,
+      "env": { "ACC_DATA": "data-dev" }
+    }
+  ]
+}
