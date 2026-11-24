@@ -61,7 +61,7 @@ Hard rules:
 - Write in clear, simple English for the team, except where a field asks for the target language.`;
 
 // ---------- Product context sent to the AI ----------
-function productContext(p) {
+export function productContext(p) {
   const { MARKETS } = productContext;
   const country = MARKETS?.[p.country]?.name || p.country || 'not set';
   let markets = [];

@@ -222,3 +222,139 @@ export function tx(fn) {
   db.exec('BEGIN');
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
+
+// ---------- Module 2: footage library & AI scene analysis (new tables only; nothing above changes) ----------
+db.exec(`
+-- One uploaded video (the original is kept as uploaded; scenes point into it by time).
+CREATE TABLE IF NOT EXISTS footage_assets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,      -- numbers are never reused (AI costs and files are linked by number)
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  original_name TEXT NOT NULL DEFAULT '',
+  ext TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT NOT NULL DEFAULT '',
+  incoming TEXT NOT NULL DEFAULT '',         -- local file waiting to be stored (cleared once stored)
+  storage_key TEXT NOT NULL DEFAULT '',      -- the original video
+  proxy_key TEXT NOT NULL DEFAULT '',        -- light preview copy ('' = the original plays well as it is)
+  thumb_key TEXT NOT NULL DEFAULT '',
+  duration REAL NOT NULL DEFAULT 0,
+  width INTEGER NOT NULL DEFAULT 0,
+  height INTEGER NOT NULL DEFAULT 0,
+  fps REAL NOT NULL DEFAULT 0,
+  vcodec TEXT NOT NULL DEFAULT '',
+  acodec TEXT NOT NULL DEFAULT '',
+  has_audio INTEGER NOT NULL DEFAULT 0,
+  rotation INTEGER NOT NULL DEFAULT 0,
+  orientation TEXT NOT NULL DEFAULT '',      -- vertical | horizontal | square
+  aspect TEXT NOT NULL DEFAULT '',           -- 9:16, 16:9, 1:1, 4:5…
+  bitrate INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'uploaded',   -- uploaded|queued|metadata|scenes|analyzing|matching|completed|failed|cancelled
+  progress REAL NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  meta_done INTEGER NOT NULL DEFAULT 0,
+  scenes_done INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fa_product ON footage_assets(product_id);
+CREATE INDEX IF NOT EXISTS idx_fa_hash ON footage_assets(product_id, sha256);
+-- A scene = a time range of one video (no file is cut).
+CREATE TABLE IF NOT EXISTS footage_scenes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER NOT NULL REFERENCES footage_assets(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  start REAL NOT NULL,
+  end REAL NOT NULL,
+  duration REAL NOT NULL,
+  thumb_key TEXT NOT NULL DEFAULT '',
+  phash TEXT NOT NULL DEFAULT '',            -- 64-bit picture fingerprint (hex), for look-alike scenes
+  sharpness REAL NOT NULL DEFAULT 0,         -- measured on frames
+  brightness REAL NOT NULL DEFAULT 0,
+  contrast REAL NOT NULL DEFAULT 0,
+  motion REAL NOT NULL DEFAULT 0,
+  tech_score INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'auto',       -- auto | split | merge | trim
+  excluded INTEGER NOT NULL DEFAULT 0,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  duplicate_of INTEGER,                       -- same picture as this scene
+  similar_to INTEGER,                         -- looks like this scene
+  status TEXT NOT NULL DEFAULT 'pending',    -- pending | analyzed | failed
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fs_asset ON footage_scenes(asset_id, start);
+CREATE INDEX IF NOT EXISTS idx_fs_product ON footage_scenes(product_id);
+-- What the AI saw in a scene (one row per scene; replaced on re-analysis).
+CREATE TABLE IF NOT EXISTS scene_analyses (
+  scene_id INTEGER PRIMARY KEY REFERENCES footage_scenes(id) ON DELETE CASCADE,
+  cache_key TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  semantic TEXT NOT NULL DEFAULT '',          -- short text to match with script sentences later
+  data TEXT NOT NULL DEFAULT '{}',            -- JSON: objects, features, benefits, human, environment, camera, composition, text overlays, watermark
+  relevance INTEGER NOT NULL DEFAULT 0,       -- 0-100: how much the scene is about this product
+  ai_quality INTEGER NOT NULL DEFAULT 0,
+  quality INTEGER NOT NULL DEFAULT 0,         -- final 0-100 (measured + AI)
+  quality_note TEXT NOT NULL DEFAULT '',
+  flags TEXT NOT NULL DEFAULT '[]',           -- JSON: watermark, text_overlay, low_quality, irrelevant, staged…
+  placements TEXT NOT NULL DEFAULT '[]',      -- JSON: where in an ad it fits
+  angles_hash TEXT NOT NULL DEFAULT '',       -- marketing angles at the time of matching
+  edited INTEGER NOT NULL DEFAULT 0,          -- 1 = the team changed something
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Categories (kind 'category') and free tags (kind 'tag'); source ai or user.
+CREATE TABLE IF NOT EXISTS scene_tags (
+  id INTEGER PRIMARY KEY,
+  scene_id INTEGER NOT NULL REFERENCES footage_scenes(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('category','tag')),
+  tag TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'ai',
+  UNIQUE (scene_id, kind, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_st_tag ON scene_tags(kind, tag);
+-- Which marketing angles a scene supports, and how much (0-100).
+CREATE TABLE IF NOT EXISTS scene_angles (
+  scene_id INTEGER NOT NULL REFERENCES footage_scenes(id) ON DELETE CASCADE,
+  angle_id INTEGER NOT NULL REFERENCES angles(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'ai',
+  PRIMARY KEY (scene_id, angle_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sa_angle ON scene_angles(angle_id, score);
+-- Background work on footage (survives restarts: running jobs go back to the queue).
+CREATE TABLE IF NOT EXISTS footage_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id INTEGER REFERENCES footage_assets(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                         -- process | analyze | match
+  status TEXT NOT NULL DEFAULT 'queued',      -- queued | running | completed | failed | cancelled
+  stage TEXT NOT NULL DEFAULT '',
+  progress REAL NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  error TEXT NOT NULL DEFAULT '',
+  log TEXT NOT NULL DEFAULT '',
+  run_after TEXT NOT NULL DEFAULT (datetime('now')),
+  user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fj_status ON footage_jobs(status, run_after);
+-- AI answers kept by a key made of the file fingerprint, scene times and settings: the same footage is not paid twice.
+CREATE TABLE IF NOT EXISTS ai_cache (
+  key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+addColumn('ai_usage', 'ref', "TEXT NOT NULL DEFAULT ''");        // e.g. "asset:12"
+addColumn('ai_usage', 'cost_usd', 'REAL NOT NULL DEFAULT 0');      // estimated from tokens and the model's price
+// A restart stops footage work: it goes back to the queue and continues where it stopped.
+db.exec(`UPDATE footage_jobs SET status = 'queued', run_after = datetime('now') WHERE status = 'running';`);
+addColumn('footage_jobs', 'options', "TEXT NOT NULL DEFAULT '{}'"); // e.g. {"force":true} = ignore cached AI answers

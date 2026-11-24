@@ -94,11 +94,18 @@ Write ${n} different scripts in ${LANGUAGES[language]}.`;
 // ACC_AI_MOCK=1 answers with mock(…) instead of calling Claude (tests and local runs without a key).
 export const aiMock = () => process.env.ACC_AI_MOCK === '1';
 
-export async function callJson({ kind, system, content, schema, productId = null, userId = null, effort = 'medium', maxTokens = 32000, mock }) {
+// Price per million tokens (input, output) in US dollars, to estimate what each call cost.
+export const PRICES = { 'claude-opus-5-5': [4, 20], 'claude-sonnet-5-5': [2, 10], 'claude-haiku-5-5': [0.1, 0.5], 'claude-fable-5-2': [8, 40] };
+export const costOf = (model, inTok, outTok) => { const p = PRICES[model] || PRICES['claude-opus-5-5']; return (inTok * p[0] + outTok * p[1]) / 1e6; };
+
+export async function callJson({ kind, system, content, schema, productId = null, userId = null, effort = 'medium', maxTokens = 32000, mock, ref = '', model = MODEL }) {
   const { validate, forApi, trimLists } = await import('./schema.js');
   const { db } = await import('./db.js');
-  const log = (ok, usage, ms, error = '') => db.prepare(`INSERT INTO ai_usage (kind, product_id, model, input_tokens, output_tokens, ms, ok, error, user_id) VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(kind, productId, aiMock() ? 'mock' : MODEL, usage?.input_tokens || 0, usage?.output_tokens || 0, ms, ok ? 1 : 0, String(error).slice(0, 500), userId);
+  const log = (ok, usage, ms, error = '') => {
+    const inTok = (usage?.input_tokens || 0) + (usage?.cache_read_input_tokens || 0) + (usage?.cache_creation_input_tokens || 0), outTok = usage?.output_tokens || 0;
+    db.prepare(`INSERT INTO ai_usage (kind, product_id, model, input_tokens, output_tokens, ms, ok, error, user_id, ref, cost_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(kind, productId, aiMock() ? 'mock' : model, inTok, outTok, ms, ok ? 1 : 0, String(error).slice(0, 500), userId, ref, aiMock() ? 0 : costOf(model, inTok, outTok));
+  };
   if (aiMock() && mock) {
     if (process.env.ACC_AI_MOCK_DELAY) await new Promise(r => setTimeout(r, Number(process.env.ACC_AI_MOCK_DELAY)));
     const data = mock();
@@ -114,7 +121,7 @@ export async function callJson({ kind, system, content, schema, productId = null
     let res;
     try {
       res = await getClient().beta.messages.stream({
-        model: MODEL,
+        model,
         max_tokens: maxTokens,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',

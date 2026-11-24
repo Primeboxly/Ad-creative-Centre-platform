@@ -13,6 +13,8 @@ import { writeScripts, LANGUAGES, aiReady, aiMock, splitScript } from './ai.js';
 import { safeGet, extractProduct } from './fetchpage.js';
 import { setMarkets, strategyState, startAnalysis, startAngles, startOneAngle, addCustomAngle, updateAngle, saveSelection, aiReadPage } from './strategy.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
+import { mountFootage } from './footage-routes.js';
+import { startFootageWorker, deleteProductFootage } from './footage.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3100;
@@ -362,8 +364,9 @@ app.get('/api/ai-usage', requireAdmin, (req, res) => {
   });
 });
 
-app.delete('/api/products/:id', requireAdmin, (req, res) => {
+app.delete('/api/products/:id', requireAdmin, h(async (req, res) => {
   const p = productOr404(idParam(req.params.id));
+  await deleteProductFootage(p.id); // footage library: stored videos, previews and pictures
   const clips = db.prepare(`SELECT id, file FROM clips WHERE product_id = ?`).all(p.id);
   const creatives = db.prepare(`SELECT id, file FROM creatives WHERE product_id = ?`).all(p.id);
   const raws = db.prepare(`SELECT file FROM raws WHERE product_id = ? AND status <> 'splitting'`).all(p.id);
@@ -376,7 +379,7 @@ app.delete('/api/products/:id', requireAdmin, (req, res) => {
   for (const i of insp) { removeFile(FILES_DIR, i.file); rmSync(thumbOf('insp', i.id), { force: true }); }
   for (const f of new Set([p.image, ...pimgs.map(x => x.file)].filter(Boolean))) removeFile(FILES_DIR, f);
   res.json({ ok: true });
-});
+}));
 
 // ---------- Product picture and inspiration files ----------
 const IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
@@ -773,6 +776,9 @@ app.get('/media/thumb/:type/:id', (req, res) => {
   res.sendFile(f, { headers: { 'Cache-Control': 'private, max-age=3600' } });
 });
 
+// ---------- Footage library & AI scene analysis (Module 2) ----------
+mountFootage(app, { h, idParam, str, productOr404 });
+
 // ---------- Errors ----------
 app.use((err, req, res, next) => {
   res.set('Cache-Control', 'no-store'); // never let a browser keep an error
@@ -791,4 +797,5 @@ if (noUsers() && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
 
 resumeRenders();
 resumeSplits();
+startFootageWorker();
 app.listen(PORT, () => console.log(`Ad creative Centre on http://localhost:${PORT}`));

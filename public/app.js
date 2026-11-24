@@ -271,7 +271,8 @@ async function renderProduct(id) {
     state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
     clips.forEach(c => state.sel[c.kind].add(c.id));
     if (!clips.length) { location.hash = `product/${id}/footage`; return toast('Add footage first: drop your TikToks in Auto-split'); }
-    if (state.tab !== 'footage') { location.hash = `product/${id}/footage`; setTimeout(openStudio, 400); } else openStudio();
+    state.ftab = 'clips';
+    if (state.tab !== 'footage') { location.hash = `product/${id}/footage`; setTimeout(openStudio, 400); } else { renderFootage(); openStudio(); }
   };
   const del = $('#delProduct');
   if (del) del.onclick = async () => {
@@ -928,7 +929,7 @@ const ROLE_ORDER = { hook: 0, body: 1, cta: 2 };
 const isSel = c => state.sel[c.kind]?.has(c.id);
 const selCount = () => state.sel.hook.size + state.sel.body.size + state.sel.cta.size;
 
-function renderFootage() {
+function renderClipsTab() {
   const { clips, raws } = state.data;
   // Clips grouped by the video they were cut from, in the order they play.
   const groups = [];
@@ -936,11 +937,11 @@ function renderFootage() {
     const g = groups.find(x => x.name === c.original_name);
     g ? g.clips.push(c) : groups.push({ name: c.original_name, clips: [c] });
   }
-  const t = $('#tab');
+  const t = $('#ftabBody');
   t.innerHTML = `
     <div class="card autosplit">
-      <h2>🎞 Add footage</h2>
-      <div class="hint">Drop your videos (TikTok downloads, phone videos, supplier videos). Each one is cut into clips on its scene changes, ready to be put together into ads.</div>
+      <h2>✂️ Clips for the ad maker</h2>
+      <div class="hint">The current ad maker uses these clips. Drop videos here, or send a video from the library (✂️ To ad maker): each one is cut into clips on its scene changes.</div>
       <div class="drop" data-raw>⬆ Drop videos here or click to upload<input type="file" accept="video/*" multiple class="hidden"></div>
       <div class="progress hidden"><div></div></div>
       ${raws.length ? `<div class="raws">${raws.map(r => `
@@ -998,15 +999,15 @@ function renderFootage() {
     }, 3000);
   }
   const setSel = (list, on) => list.forEach(c => (on ? state.sel[c.kind].add(c.id) : state.sel[c.kind].delete(c.id)));
-  $('#selAll')?.addEventListener('click', () => { setSel(clips, selCount() !== clips.length); renderFootage(); });
+  $('#selAll')?.addEventListener('click', () => { setSel(clips, selCount() !== clips.length); renderClipsTab(); });
   t.querySelectorAll('[data-gsel]').forEach(b => b.onclick = () => {
     const g = groups.find(x => x.name === b.dataset.gsel);
     setSel(g.clips, !g.clips.every(isSel));
-    renderFootage();
+    renderClipsTab();
   });
   t.querySelectorAll('.clip').forEach(el => {
     const c = clips.find(x => x.id === Number(el.dataset.id));
-    $('.tick', el).onchange = e => { setSel([c], e.target.checked); renderFootage(); };
+    $('.tick', el).onchange = e => { setSel([c], e.target.checked); renderClipsTab(); };
     $('[data-del]', el).onclick = async () => {
       if (!confirm('Delete this clip?')) return;
       try { await api(`/api/clips/${c.id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
@@ -1551,5 +1552,459 @@ async function renderTeam() {
     };
   });
 }
+
+// ---------- Footage library (Module 2): original videos, AI scenes, scene inspector ----------
+const FST = { uploaded: '⬆ Uploaded', queued: '⏳ Queued', storing: '💾 Saving the original', metadata: '🔎 Extracting metadata', scenes: '✂️ Detecting scenes',
+  analyzing: '🧠 Analyzing scenes', matching: '🎯 Matching marketing angles', completed: '✅ Completed', failed: '❌ Failed', cancelled: '⏹ Cancelled' };
+const BUSY = ['uploaded', 'queued', 'storing', 'metadata', 'scenes', 'analyzing', 'matching'];
+const fmtT = s => { s = Math.max(0, s || 0); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
+const fmtSize = b => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1e3)} KB`);
+const qClass = q => (q == null ? 'q-none' : q >= 75 ? 'q-good' : q >= 50 ? 'q-ok' : 'q-bad');
+const FLAG = { watermark: ['💧', 'Watermark'], text_overlay: ['🔤', 'Text on screen'], low_quality: ['⚠', 'Low quality'], irrelevant: ['🚫', 'Not about the product'], staged: ['🎭', 'Staged / promotional (not a real customer)'] };
+
+async function loadFootage() {
+  const pid = state.product;
+  const [cfg, lib, sc] = await Promise.all([
+    state.footCfg ? state.footCfg : api('/api/footage/config'),
+    api(`/api/products/${pid}/footage`),
+    api(`/api/products/${pid}/scenes`),
+  ]);
+  state.footCfg = cfg;
+  state.foot = { ...lib, scenes: sc.scenes, pid };
+  state.fflt ??= { q: '', video: '', cat: '', angle: '', minQ: '', dur: '', aspect: '', status: '', fav: false, showExcl: false, sort: 'quality', vq: '', vstatus: '' };
+}
+
+async function renderFootage() {
+  state.ftab ||= 'videos';
+  const t = $('#tab');
+  if (state.ftab !== 'clips') {
+    try { await loadFootage(); } catch (e) { fail(e); }
+  }
+  const f = state.foot || { assets: [], scenes: [], totals: {} };
+  const busy = f.assets.filter(a => BUSY.includes(a.status)).length;
+  const analyzed = f.scenes.filter(s => s.status === 'analyzed').length;
+  t.innerHTML = `
+    <section class="fl-hero">
+      <div class="fl-hero-txt">
+        <span class="ag-kicker">Footage library</span>
+        <h2>🎞 Every video of this product, cut into scenes and understood by AI</h2>
+        <p>Upload once, reuse the scenes in every ad. Originals are kept as uploaded${state.footCfg ? ` (${state.footCfg.storage === 's3' ? 'cloud storage' : 'server storage'})` : ''}.</p>
+      </div>
+      <div class="ag-hero-stats fl-stats">
+        <div><b>${f.assets.length}</b><span>Videos</span></div>
+        <div><b>${f.scenes.length}</b><span>Scenes</span></div>
+        <div class="hot"><b>${analyzed}</b><span>Analysed</span></div>
+        <div><b>${f.scenes.filter(s => s.favorite).length}</b><span>★ Favourites</span></div>
+        <div><b>$${(f.totals?.ai_cost || 0).toFixed(2)}</b><span>AI cost</span></div>
+      </div>
+    </section>
+    <div class="fl-tabs">
+      <a data-ft="videos" class="${state.ftab === 'videos' ? 'on' : ''}">🎬 Original videos <i>${f.assets.length}</i>${busy ? '<span class="fl-dot"></span>' : ''}</a>
+      <a data-ft="scenes" class="${state.ftab === 'scenes' ? 'on' : ''}">✨ AI scenes <i>${f.scenes.length}</i></a>
+      <a data-ft="clips" class="${state.ftab === 'clips' ? 'on' : ''}">✂️ Clips for the ad maker <i>${state.data.clips.length}</i></a>
+    </div>
+    <div id="ftabBody"></div>`;
+  t.querySelectorAll('[data-ft]').forEach(a => a.onclick = () => { state.ftab = a.dataset.ft; renderFootage(); });
+  if (state.ftab === 'clips') return renderClipsTab();
+  if (state.ftab === 'scenes') drawScenes(); else drawVideos();
+  watchFootage();
+}
+
+// While videos are processed, refresh every 2.5 s (only the lists, so typing in the filters is not lost).
+function watchFootage() {
+  clearInterval(state.fpoll);
+  const pid = state.product;
+  const busy = () => state.foot?.assets.some(a => BUSY.includes(a.status)) || ['queued', 'running'].includes(state.foot?.match_job?.status);
+  if (!busy()) return;
+  state.fpoll = setInterval(async () => {
+    if (state.tab !== 'footage' || state.ftab === 'clips' || state.product !== pid || !location.hash.startsWith(`#product/${pid}`)) return clearInterval(state.fpoll);
+    if (document.querySelector('.insp')) return; // do not redraw under the open inspector
+    try { await loadFootage(); } catch { return; }
+    state.ftab === 'scenes' ? drawScenes() : drawVideos();
+    if (!busy()) { clearInterval(state.fpoll); renderFootage(); }
+  }, 2500);
+}
+
+// ----- Original videos -----
+function drawVideos() {
+  const f = state.foot, cfg = state.footCfg, flt = state.fflt;
+  const body = $('#ftabBody');
+  if (!body) return;
+  const keep = document.activeElement?.id;
+  const q = flt.vq.trim().toLowerCase();
+  const list = f.assets.filter(a => (!q || a.name.toLowerCase().includes(q) || a.original_name.toLowerCase().includes(q))
+    && (!flt.vstatus || (flt.vstatus === 'busy' ? BUSY.includes(a.status) : a.status === flt.vstatus)));
+  body.innerHTML = `
+    <div class="fl-drop" id="flDrop">
+      <input type="file" accept="${cfg.formats.join(',')},video/mp4,video/quicktime,video/webm" multiple class="hidden">
+      <div class="fl-drop-ic">⬆</div>
+      <div><b>Drop videos here, or click to choose</b>
+        <small>MP4, MOV, WebM · up to ${cfg.maxMb >= 1024 ? `${(cfg.maxMb / 1024).toFixed(cfg.maxMb % 1024 ? 1 : 0)} GB` : `${cfg.maxMb} MB`} each · 20 at a time · AI analysis ≈ $${cfg.estimate30s.usd.toFixed(2)} per 30 s of video</small></div>
+      <div class="fl-up hidden"><div class="fl-up-bar"><i></i></div><span>0%</span></div>
+    </div>
+    <div class="fl-tools">
+      <input type="search" id="fvQ" placeholder="🔍 Search videos…" value="${esc(flt.vq)}">
+      <select id="fvSt"><option value="">All statuses</option><option value="busy" ${flt.vstatus === 'busy' ? 'selected' : ''}>Processing</option>
+        ${['completed', 'failed', 'cancelled'].map(s => `<option value="${s}" ${flt.vstatus === s ? 'selected' : ''}>${FST[s]}</option>`).join('')}</select>
+      <span class="muted small">${list.length} of ${f.assets.length}</span>
+    </div>
+    ${list.length ? `<div class="fv-grid">${list.map(videoCard).join('')}</div>` : `<div class="empty card">${f.assets.length ? 'No video matches.' : 'No video yet. Drop your TikToks, phone or supplier videos above.'}</div>`}`;
+  // Upload
+  const drop = $('#flDrop'), input = $('input', drop);
+  drop.onclick = e => { if (e.target !== input) input.click(); };
+  input.onchange = () => uploadFootage(input.files);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); uploadFootage(e.dataTransfer.files); };
+  $('#fvQ').oninput = e => { flt.vq = e.target.value; drawVideos(); };
+  $('#fvSt').onchange = e => { flt.vstatus = e.target.value; drawVideos(); };
+  if (keep === 'fvQ') { const i = $('#fvQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  body.querySelectorAll('.fv-card').forEach(card => {
+    const a = f.assets.find(x => x.id === Number(card.dataset.id));
+    const on = (sel, fn) => { const b = $(sel, card); if (b) b.onclick = e => { e.stopPropagation(); fn(b); }; };
+    on('[data-play]', () => a.stored && play(`/media/footage/${a.id}/preview`));
+    on('[data-rename]', async () => {
+      const name = prompt('Video name:', a.name);
+      if (name && name.trim() !== a.name) try { await api(`/api/footage/${a.id}`, { method: 'PATCH', body: { name } }); renderFootage(); } catch (e) { fail(e); }
+    });
+    on('[data-retry]', async () => { try { await api(`/api/footage/${a.id}/retry`, { method: 'POST' }); toast('Processing again'); renderFootage(); } catch (e) { fail(e); } });
+    on('[data-cancel]', async () => { try { await api(`/api/footage/${a.id}/cancel`, { method: 'POST' }); toast('Stopping…'); setTimeout(renderFootage, 800); } catch (e) { fail(e); } });
+    on('[data-del]', async () => {
+      if (!confirm(`Delete "${a.name}" and its ${a.scenes} scenes? The original video is deleted too. This cannot be undone.`)) return;
+      try { await api(`/api/footage/${a.id}`, { method: 'DELETE' }); toast('Video deleted'); renderFootage(); } catch (e) { fail(e); }
+    });
+    on('[data-scenes]', () => { state.fflt.video = String(a.id); state.ftab = 'scenes'; renderFootage(); });
+    on('[data-toclips]', async () => { try { await api(`/api/footage/${a.id}/to-clips`, { method: 'POST' }); toast('Sent to the ad maker: it is being cut into clips'); } catch (e) { fail(e); } });
+    on('[data-log]', () => showJobLog(a));
+  });
+}
+
+function videoCard(a) {
+  const busy = BUSY.includes(a.status);
+  const pct = Math.round((a.progress || 0) * 100);
+  const chips = a.duration ? [fmtDur(a.duration), `${a.width}×${a.height}`, a.aspect, a.fps ? `${a.fps} fps` : '', a.vcodec, fmtSize(a.size), a.has_audio ? '🔊 sound' : '🔇 no sound'].filter(Boolean) : [fmtSize(a.size)];
+  return `<article class="fv-card st-${a.status}" data-id="${a.id}">
+    <div class="fv-media ${a.orientation || ''}" data-play title="Preview">
+      ${a.meta_done ? `<img src="/media/footage/${a.id}/thumb" alt="" loading="lazy">` : '<div class="fv-ph">🎬</div>'}
+      ${a.stored && a.meta_done ? '<span class="fv-playbtn">▶</span>' : ''}
+      ${a.duration ? `<span class="fv-dur">${fmtDur(a.duration)}</span>` : ''}
+      ${a.orientation ? `<span class="fv-ori">${a.orientation === 'vertical' ? '▯' : a.orientation === 'horizontal' ? '▭' : '◻'} ${esc(a.aspect)}</span>` : ''}
+    </div>
+    <div class="fv-body">
+      <div class="fv-name"><b title="${esc(a.original_name)}">${esc(a.name)}</b><button class="icon-btn sm" data-rename title="Rename">✏️</button></div>
+      <div class="fv-chips">${chips.map(c => `<span>${esc(c)}</span>`).join('')}</div>
+      ${busy ? `<div class="fv-prog"><div class="fv-prog-top"><span>${FST[a.status] || a.status}</span><b>${pct}%</b></div><div class="fv-bar"><i style="width:${Math.max(4, pct)}%"></i></div>
+          ${a.error ? `<small class="muted">${esc(a.error)}</small>` : ''}<button class="btn sm ghost" data-cancel>⏹ Cancel</button></div>`
+        : a.status === 'failed' || a.status === 'cancelled' ? `<div class="fv-err"><span>${FST[a.status]}${a.error ? `: ${esc(a.error)}` : ''}</span><button class="btn sm" data-retry>↻ Retry</button></div>`
+        : `<div class="fv-done"><span class="fv-ok">${FST.completed}</span>${a.error ? `<span class="fv-warn">${esc(a.error)}</span><button class="btn sm" data-retry>↻ Retry analysis</button>` : ''}</div>`}
+    </div>
+    <div class="fv-foot">
+      <button class="btn sm primary" data-scenes ${a.scenes ? '' : 'disabled'}>✨ ${a.scenes} scene${a.scenes === 1 ? '' : 's'}</button>
+      <span class="fv-cost" title="${a.ai_calls} AI call(s)">${a.ai_calls ? `AI $${a.ai_cost.toFixed(3)}` : ''}</span>
+      <div class="fv-acts">
+        <button class="icon-btn" data-log title="Processing log">📋</button>
+        ${a.stored ? `<button class="icon-btn" data-toclips title="Also cut it into clips for the ad maker">✂️</button><a class="icon-btn" href="/media/footage/${a.id}/original?download=1" title="Download the original" onclick="event.stopPropagation()">⬇</a>` : ''}
+        <button class="icon-btn danger" data-del title="Delete">🗑</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function uploadFootage(files) {
+  if (!files?.length) return;
+  const max = state.footCfg.maxMb * 1024 * 1024;
+  const ok = [...files].filter(f => f.size <= max);
+  if (ok.length < files.length) toast(`${files.length - ok.length} video(s) are bigger than ${state.footCfg.maxMb} MB and were skipped`, true);
+  if (!ok.length) return;
+  const fd = new FormData();
+  for (const f of ok.slice(0, 20)) fd.append('files', f);
+  const up = $('#flDrop .fl-up');
+  up.classList.remove('hidden');
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/products/${state.product}/footage`);
+  xhr.upload.onprogress = e => { if (!e.lengthComputable) return; const p = Math.round((e.loaded / e.total) * 100); $('i', up).style.width = `${p}%`; $('span', up).textContent = p < 100 ? `Uploading ${p}%` : 'Checking the files…'; };
+  xhr.onload = () => {
+    const r = JSON.parse(xhr.responseText || '{}');
+    if (xhr.status >= 300) { up.classList.add('hidden'); return fail(new Error(r.error || 'Upload failed')); }
+    const msg = [r.added?.length ? `${r.added.length} video(s) added: processing starts now` : '',
+      r.duplicates?.length ? `${r.duplicates.length} already in the library (${r.duplicates.map(d => d.existing).join(', ')})` : '',
+      r.rejected?.length ? `${r.rejected.length} refused: ${r.rejected.map(x => `${x.name} (${x.reason})`).join(', ')}` : ''].filter(Boolean).join(' · ');
+    toast(msg || 'Nothing added', !r.added?.length);
+    renderFootage();
+  };
+  xhr.onerror = () => { up.classList.add('hidden'); fail(new Error('Upload failed: check your connection')); };
+  xhr.send(fd);
+}
+
+async function showJobLog(a) {
+  let jobs = [];
+  try { jobs = await api(`/api/footage/${a.id}/jobs`); } catch (e) { return fail(e); }
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<div class="modal-card"><h2>📋 ${esc(a.name)}</h2>
+    ${jobs.map(j => `<div class="job-row"><b>${esc(j.kind)} · ${esc(j.status)}</b> <span class="muted small">attempt ${j.attempts} · ${esc(j.created_at)}</span>
+      ${j.error ? `<div class="fv-warn">${esc(j.error)}</div>` : ''}<pre>${esc(j.log || '(no log yet)')}</pre></div>`).join('') || '<p class="muted">No job yet.</p>'}
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-x>Close</button></div></div>`;
+  m.onclick = e => { if (e.target === m || e.target.dataset.x !== undefined) m.remove(); };
+  document.body.appendChild(m);
+}
+
+// ----- AI scenes -----
+function filteredScenes() {
+  const f = state.foot, x = state.fflt;
+  const q = x.q.trim().toLowerCase();
+  let list = f.scenes.filter(s => (x.showExcl || !s.excluded)
+    && (!x.fav || s.favorite)
+    && (!x.video || s.asset_id === Number(x.video))
+    && (!x.cat || s.categories.some(c => c.key === x.cat))
+    && (!x.angle || s.angles.some(a => a.angle_id === Number(x.angle)))
+    && (!x.minQ || (s.quality ?? -1) >= Number(x.minQ))
+    && (!x.dur || (x.dur === 's' ? s.duration < 2 : x.dur === 'm' ? s.duration >= 2 && s.duration <= 5 : s.duration > 5))
+    && (!x.aspect || s.aspect === x.aspect)
+    && (!x.status || s.status === x.status)
+    && (!q || [s.description, s.semantic, s.asset_name, ...s.tags.map(t => t.tag), ...s.categories.map(c => c.label), ...s.angles.map(a => a.name)].join(' ').toLowerCase().includes(q)));
+  const by = { quality: (a, b) => (b.quality ?? -1) - (a.quality ?? -1), video: (a, b) => a.asset_id - b.asset_id || a.start - b.start, long: (a, b) => b.duration - a.duration,
+    angle: (a, b) => (b.angles.find(z => z.angle_id === Number(x.angle))?.score ?? 0) - (a.angles.find(z => z.angle_id === Number(x.angle))?.score ?? 0) };
+  return list.sort(by[x.sort] || by.quality);
+}
+
+function drawScenes() {
+  const f = state.foot, x = state.fflt, cfg = state.footCfg;
+  const body = $('#ftabBody');
+  if (!body) return;
+  const keep = document.activeElement?.id;
+  const list = filteredScenes();
+  const aspects = [...new Set(f.assets.map(a => a.aspect).filter(Boolean))];
+  const opt = (v, label, cur) => `<option value="${esc(v)}" ${String(cur) === String(v) ? 'selected' : ''}>${esc(label)}</option>`;
+  const busyMatch = f.match_job && ['queued', 'running'].includes(f.match_job.status);
+  body.innerHTML = `
+    ${f.angles_stale && !busyMatch ? `<div class="fl-banner">🎯 <div><b>Marketing angles changed</b><small>${f.angles_stale} analysed scene(s) were matched with older angles.</small></div><button class="btn primary sm" id="flRematch">↻ Re-match scenes</button></div>` : ''}
+    ${busyMatch ? `<div class="fl-banner info"><span class="spin sm"></span><div><b>Matching scenes with the marketing angles…</b><small>${Math.round((f.match_job.progress || 0) * 100)}%</small></div></div>` : ''}
+    <div class="fs-filters">
+      <input type="search" id="fsQ" placeholder="🔍 Search scenes, tags, angles…" value="${esc(x.q)}">
+      <select data-f="video">${opt('', 'All videos', x.video)}${f.assets.map(a => opt(a.id, a.name, x.video)).join('')}</select>
+      <select data-f="cat">${opt('', 'All categories', x.cat)}${Object.entries(cfg.categories).map(([k, l]) => opt(k, l, x.cat)).join('')}</select>
+      <select data-f="angle">${opt('', 'All angles', x.angle)}${f.angles.map(a => opt(a.id, `${a.selected ? '★ ' : ''}${a.name}`, x.angle)).join('')}</select>
+      <select data-f="minQ">${opt('', 'Any quality', x.minQ)}${opt(40, 'Quality 40+', x.minQ)}${opt(60, 'Quality 60+', x.minQ)}${opt(80, 'Quality 80+', x.minQ)}</select>
+      <select data-f="dur">${opt('', 'Any length', x.dur)}${opt('s', 'Under 2 s', x.dur)}${opt('m', '2 to 5 s', x.dur)}${opt('l', 'Over 5 s', x.dur)}</select>
+      <select data-f="aspect">${opt('', 'Any format', x.aspect)}${aspects.map(a => opt(a, a, x.aspect)).join('')}</select>
+      <select data-f="status">${opt('', 'Any status', x.status)}${opt('analyzed', 'Analysed', x.status)}${opt('pending', 'Waiting for AI', x.status)}${opt('failed', 'Analysis failed', x.status)}</select>
+      <label class="fs-tg"><input type="checkbox" data-f="fav" ${x.fav ? 'checked' : ''}>★ Favourites</label>
+      <label class="fs-tg"><input type="checkbox" data-f="showExcl" ${x.showExcl ? 'checked' : ''}>Show excluded</label>
+      <select data-f="sort">${opt('quality', 'Sort: best quality', x.sort)}${opt('video', 'Sort: video order', x.sort)}${opt('long', 'Sort: longest', x.sort)}${x.angle ? opt('angle', 'Sort: angle match', x.sort) : ''}</select>
+      <button class="btn sm ghost" id="fsReset">Reset</button>
+    </div>
+    <div class="fs-count">${list.length} scene${list.length === 1 ? '' : 's'}${list.length !== f.scenes.length ? ` of ${f.scenes.length}` : ''} · hover to play, click to open</div>
+    ${list.length ? `<div class="fs-grid">${list.map(sceneCard).join('')}</div>` : `<div class="empty card">${f.scenes.length ? 'No scene matches these filters.' : 'No scene yet: upload videos in “Original videos”.'}</div>`}`;
+  $('#flRematch')?.addEventListener('click', async () => { try { await api(`/api/products/${state.product}/scenes/rematch`, { method: 'POST' }); toast('Matching started'); renderFootage(); } catch (e) { fail(e); } });
+  $('#fsQ').oninput = e => { x.q = e.target.value; drawScenes(); };
+  if (keep === 'fsQ') { const i = $('#fsQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  body.querySelectorAll('[data-f]').forEach(el => el.onchange = () => { x[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value; if (el.dataset.f === 'angle' && el.value) x.sort = 'angle'; drawScenes(); });
+  $('#fsReset').onclick = () => { Object.assign(x, { q: '', video: '', cat: '', angle: '', minQ: '', dur: '', aspect: '', status: '', fav: false, showExcl: false, sort: 'quality' }); drawScenes(); };
+  body.querySelectorAll('.fs-card').forEach(card => {
+    const s = f.scenes.find(z => z.id === Number(card.dataset.id));
+    card.onclick = () => openInspector(s.id);
+    $('[data-fav]', card).onclick = async e => { e.stopPropagation(); await patchScene(s, { favorite: !s.favorite }); drawScenes(); };
+    $('[data-excl]', card).onclick = async e => { e.stopPropagation(); await patchScene(s, { excluded: !s.excluded }); drawScenes(); };
+    hoverPlay(card, s);
+  });
+}
+
+function sceneCard(s) {
+  const a = state.foot.assets.find(x => x.id === s.asset_id);
+  const shown = s.angles.slice(0, 2);
+  const look = s.duplicate_of ? '<span title="Same picture as another scene">⧉</span>' : s.similar_to ? '<span title="Looks like another scene">≈</span>' : '';
+  return `<article class="fs-card ${s.excluded ? 'excl' : ''} ${s.favorite ? 'fav' : ''}" data-id="${s.id}">
+    <div class="fs-media ${a?.orientation || ''}">
+      ${s.has_thumb ? `<img src="/media/scene/${s.id}/thumb?v=${s.start}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div class="fv-ph">⏳</div>'}
+      <span class="fs-q ${qClass(s.quality)}" title="Quality score">${s.quality ?? '–'}</span>
+      <span class="fv-dur">${s.duration.toFixed(1)}s</span>
+      <div class="fs-flags">${s.flags.filter(k => FLAG[k]).map(k => `<span title="${FLAG[k][1]}">${FLAG[k][0]}</span>`).join('')}${look}</div>
+      <button class="fs-btn fav-btn ${s.favorite ? 'on' : ''}" data-fav title="Favourite">★</button>
+      <button class="fs-btn excl-btn ${s.excluded ? 'on' : ''}" data-excl title="${s.excluded ? 'Use it again' : 'Exclude from future ads'}">🚫</button>
+      ${s.status === 'pending' ? '<div class="fs-state"><span class="spin sm"></span> Waiting for AI</div>' : s.status === 'failed' ? `<div class="fs-state bad">❌ ${esc(s.error || 'Analysis failed')}</div>` : ''}
+      ${s.excluded ? '<div class="fs-state excl">Excluded</div>' : ''}
+    </div>
+    <div class="fs-body">
+      <div class="fs-time">${fmtT(s.start)} → ${fmtT(s.end)} <span>· ${esc(s.asset_name)}</span></div>
+      <p class="fs-desc">${esc(s.description || (s.status === 'analyzed' ? '' : 'Not analysed yet'))}</p>
+      <div class="fs-cats">${s.categories.slice(0, 3).map(c => `<span>${esc(c.label)}</span>`).join('')}${s.categories.length > 3 ? `<span>+${s.categories.length - 3}</span>` : ''}</div>
+      ${shown.length ? `<div class="fs-angles">${shown.map(x => `<span title="${esc(x.reason)}"><b>${x.score}%</b> ${esc(x.name)}</span>`).join('')}</div>` : ''}
+    </div>
+  </article>`;
+}
+
+// Hovering a scene plays just its seconds of the video (the original is never cut).
+function hoverPlay(card, s) {
+  const box = $('.fs-media', card);
+  let v = null, t = null;
+  card.onmouseenter = () => {
+    t = setTimeout(() => {
+      v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.src = `/media/footage/${s.asset_id}/preview#t=${s.start.toFixed(2)},${s.end.toFixed(2)}`;
+      v.className = 'fs-hover';
+      v.onloadedmetadata = () => { v.currentTime = s.start; v.play().catch(() => {}); };
+      v.ontimeupdate = () => { if (v.currentTime >= s.end - 0.05 || v.currentTime < s.start - 0.3) v.currentTime = s.start; };
+      box.appendChild(v);
+    }, 250);
+  };
+  card.onmouseleave = () => { clearTimeout(t); if (v) { v.pause(); v.removeAttribute('src'); v.load(); v.remove(); v = null; } };
+}
+
+async function patchScene(s, body) {
+  try {
+    const n = await api(`/api/scenes/${s.id}`, { method: 'PATCH', body });
+    Object.assign(s, n);
+    return n;
+  } catch (e) { fail(e); }
+}
+
+// ----- Scene inspector -----
+async function openInspector(id) {
+  let s;
+  try { s = await api(`/api/scenes/${id}`); } catch (e) { return fail(e); }
+  const cfg = state.footCfg, f = state.foot;
+  const a = f.assets.find(x => x.id === s.asset_id) || {};
+  const d = s.details || {};
+  const qp = d.quality_parts || {};
+  const draft = {
+    categories: new Set(s.categories.map(c => c.key)), tags: s.tags.map(t => t.tag),
+    placements: new Map(s.placements.map(p => [p.placement, p.fit])), angles: s.angles.map(x => ({ ...x })),
+  };
+  document.querySelector('.insp')?.remove();
+  const m = document.createElement('div');
+  m.className = 'modal insp';
+  const bar = (label, v) => `<div class="ib-row"><span>${label}</span><div class="ib-bar"><i class="${qClass(v)}" style="width:${v ?? 0}%"></i></div><b>${v ?? '–'}</b></div>`;
+  const list = (arr) => (arr?.length ? arr.map(x => `<span>${esc(x)}</span>`).join('') : '<em>none</em>');
+  const ORIGIN = { real_customer_style: 'Looks like a real customer video', staged_or_promotional: 'Staged / promotional footage (never use as a customer testimonial)', synthetic_or_cgi: 'Synthetic / CGI footage', unclear: 'Unclear' };
+  const draw = () => {
+    m.innerHTML = `<div class="insp-card">
+      <header class="insp-head">
+        <div><span class="ag-kicker">Scene ${s.id} · ${esc(s.asset_name)}</span><h2>${fmtT(s.start)} → ${fmtT(s.end)} <small>${s.duration.toFixed(2)} s</small></h2></div>
+        <div class="insp-head-btns">
+          <button class="btn sm ${s.favorite ? 'on-fav' : ''}" data-act="fav">★ ${s.favorite ? 'Favourite' : 'Add to favourites'}</button>
+          <button class="btn sm ${s.excluded ? 'on-excl' : ''}" data-act="excl">🚫 ${s.excluded ? 'Excluded' : 'Exclude'}</button>
+          <button class="icon-btn" data-act="close" title="Close">✕</button>
+        </div>
+      </header>
+      <div class="insp-body">
+        <div class="insp-left">
+          <div class="insp-player ${a.orientation || ''}"><video id="ipV" src="/media/footage/${s.asset_id}/preview" playsinline controls></video></div>
+          <div class="insp-tl" id="ipTl" title="Whole video: the coloured part is this scene">
+            <i class="tl-scene" style="left:${(s.start / (a.duration || s.end)) * 100}%;width:${(s.duration / (a.duration || s.end)) * 100}%"></i><i class="tl-head" id="ipHead"></i>
+          </div>
+          <div class="insp-time"><span id="ipNow">${fmtT(s.start)}</span><label class="fs-tg"><input type="checkbox" id="ipLoop" checked> Loop this scene</label></div>
+          <div class="insp-edit">
+            <button class="btn sm" data-act="split" title="Cut the scene in two at the current time">✂ Split here</button>
+            <button class="btn sm" data-act="start" title="The scene starts at the current time">⇤ Start here</button>
+            <button class="btn sm" data-act="end" title="The scene ends at the current time">End here ⇥</button>
+            <button class="btn sm" data-act="merge" title="Join with the next scene of the video">⤳ Merge with next</button>
+            <button class="btn sm" data-act="reanalyze" title="Ask the AI again (costs a little)">↻ Re-analyse</button>
+          </div>
+          <div class="insp-trim"><label>Start <input type="number" step="0.1" min="0" id="ipS" value="${s.start.toFixed(2)}"></label><label>End <input type="number" step="0.1" min="0" id="ipE" value="${s.end.toFixed(2)}"></label><button class="btn sm" data-act="trim">Save times</button></div>
+          <p class="muted small">Edits only change the scene's times: the original video is never modified.</p>
+        </div>
+        <div class="insp-right">
+          ${s.status !== 'analyzed' ? `<div class="fl-banner ${s.status === 'failed' ? '' : 'info'}">${s.status === 'failed' ? '❌' : '<span class="spin sm"></span>'}<div><b>${s.status === 'failed' ? 'Analysis failed' : 'Waiting for the AI analysis'}</b><small>${esc(s.error || 'It updates by itself.')}</small></div></div>` : ''}
+          <div class="insp-score">
+            <div class="big-q ${qClass(s.quality)}"><b>${s.quality ?? '–'}</b><span>quality</span></div>
+            <div><p>${esc(s.quality_note || 'No quality note yet.')}</p>
+              <div class="insp-pills">${s.relevance != null ? `<span>🎯 Relevance ${s.relevance}/100</span>` : ''}${s.flags.map(k => FLAG[k] ? `<span>${FLAG[k][0]} ${FLAG[k][1]}</span>` : '').join('')}
+                ${s.duplicate_of ? `<span>⧉ Same picture as scene ${s.duplicate_of}</span>` : s.similar_to ? `<span>≈ Looks like scene ${s.similar_to}</span>` : ''}</div></div>
+          </div>
+          <section><h4>Description <small>AI suggestion: edit freely</small></h4>
+            <textarea id="ipDesc" rows="3">${esc(s.description)}</textarea>
+            <label class="small muted">Short line for matching with the voice-over</label><input id="ipSem" value="${esc(s.semantic)}"></section>
+          <section><h4>What the AI sees</h4><div class="insp-facts">
+            <div><span>Objects</span><p class="tags">${list(d.objects)}</p></div>
+            <div><span>Features shown</span><p class="tags">${list(d.features_shown)}</p></div>
+            <div><span>Benefits shown</span><p class="tags">${list(d.benefits_supported)}</p></div>
+            <div><span>People & product</span><p>${esc(d.human_interaction || '—')}</p></div>
+            <div><span>Place</span><p>${esc(d.environment || '—')}</p></div>
+            <div><span>Camera</span><p>${esc(d.camera_movement || '—')}</p></div>
+            <div><span>Composition</span><p>${esc(d.composition || '—')}</p></div>
+            <div><span>Text on screen</span><p class="tags">${list(d.text_overlays)}</p></div>
+            <div><span>Watermark</span><p>${d.watermark ? (d.watermark.present ? `Yes${d.watermark.text ? `: ${esc(d.watermark.text)}` : ''}` : 'No') : '—'}</p></div>
+            <div><span>Footage type</span><p>${esc(ORIGIN[d.origin] || '—')}</p></div>
+            ${d.relevance_note ? `<div class="wide"><span>Why this relevance</span><p>${esc(d.relevance_note)}</p></div>` : ''}
+          </div></section>
+          <section><h4>Quality details</h4><div class="insp-bars">
+            <div><small class="muted">AI judgment</small>${bar('Sharpness', qp.sharpness)}${bar('Lighting', qp.lighting)}${bar('Stability', qp.stability)}${bar('Product visible', qp.product_visibility)}${bar('Composition', qp.composition)}</div>
+            <div><small class="muted">Measured on the frames</small>${bar('Sharpness', s.measured.sharpness)}${bar('Brightness', s.measured.brightness)}${bar('Contrast', s.measured.contrast)}${bar('Movement', s.measured.motion)}${bar('Picture score', s.measured.score)}</div>
+          </div></section>
+          <section><h4>Categories <small>click to change</small></h4><div class="chip-pick" id="ipCats">${Object.entries(cfg.categories).map(([k, l]) => `<button class="${draft.categories.has(k) ? 'on' : ''}" data-cat="${k}">${esc(l)}</button>`).join('')}</div></section>
+          <section><h4>Tags</h4><div class="tag-edit" id="ipTags">${draft.tags.map((t, i) => `<span>${esc(t)}<button data-tdel="${i}">✕</button></span>`).join('')}<input id="ipTagIn" placeholder="＋ add a tag, Enter"></div></section>
+          <section><h4>Where it fits in an ad</h4><div class="chip-pick" id="ipPl">${Object.entries(cfg.placements).map(([k, l]) => `<button class="${draft.placements.has(k) ? 'on' : ''}" data-pl="${k}">${esc(l)}${draft.placements.has(k) ? ` <i>${draft.placements.get(k)}%</i>` : ''}</button>`).join('')}</div></section>
+          <section><h4>Marketing angles it supports</h4>
+            <div class="ang-links" id="ipAng">${draft.angles.map((x, i) => `<div class="al-row"><b>${esc(x.name)}</b><input type="range" min="0" max="100" step="5" value="${x.score}" data-asc="${i}"><span>${x.score}%</span><button class="icon-btn sm" data-adel="${i}" title="Remove">✕</button>${x.reason ? `<small>${esc(x.reason)}</small>` : ''}</div>`).join('') || '<p class="muted small">No angle linked.</p>'}</div>
+            ${f.angles.filter(an => !draft.angles.some(x => x.angle_id === an.id)).length ? `<select id="ipAddAng"><option value="">＋ Link an angle…</option>${f.angles.filter(an => !draft.angles.some(x => x.angle_id === an.id)).map(an => `<option value="${an.id}">${esc(an.name)}</option>`).join('')}</select>` : ''}
+          </section>
+        </div>
+      </div>
+      <footer class="insp-foot"><span class="muted small">${s.edited ? '✏️ Edited by the team · ' : ''}${s.model ? `Analysed by ${esc(s.model)}` : ''}</span><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="save">Save changes</button></footer>
+    </div>`;
+    wire();
+  };
+  const v = () => $('#ipV', m);
+  const reload = async () => { try { await loadFootage(); } catch {} m.remove(); renderFootageKeep(); };
+  const act = async (name) => {
+    const t = v()?.currentTime ?? s.start;
+    try {
+      if (name === 'close') { m.remove(); return renderFootageKeep(); }
+      if (name === 'fav' || name === 'excl') { Object.assign(s, await api(`/api/scenes/${s.id}`, { method: 'PATCH', body: name === 'fav' ? { favorite: !s.favorite } : { excluded: !s.excluded } })); return draw(); }
+      if (name === 'split') { await api(`/api/scenes/${s.id}/split`, { method: 'POST', body: { at: t } }); toast('Scene split in two: the AI analyses both parts'); return reload(); }
+      if (name === 'merge') { if (!confirm('Join this scene with the next scene of the video?')) return; await api(`/api/scenes/${s.id}/merge`, { method: 'POST' }); toast('Scenes merged: the AI analyses the new scene'); return reload(); }
+      if (name === 'start' || name === 'end') { $(name === 'start' ? '#ipS' : '#ipE', m).value = t.toFixed(2); return; }
+      if (name === 'trim') {
+        await api(`/api/scenes/${s.id}/trim`, { method: 'POST', body: { start: Number($('#ipS', m).value), end: Number($('#ipE', m).value) } });
+        toast('Times saved'); return reload();
+      }
+      if (name === 'reanalyze') { await api(`/api/scenes/${s.id}/reanalyze`, { method: 'POST' }); toast('The AI analyses this scene again'); return reload(); }
+      if (name === 'save') {
+        await api(`/api/scenes/${s.id}`, { method: 'PATCH', body: {
+          description: $('#ipDesc', m).value, semantic: $('#ipSem', m).value, categories: [...draft.categories], tags: draft.tags,
+          placements: [...draft.placements].map(([placement, fit]) => ({ placement, fit })),
+          angles: draft.angles.map(x => ({ angle_id: x.angle_id, score: x.score, reason: x.reason })),
+        } });
+        toast('Scene saved'); return reload();
+      }
+    } catch (e) { fail(e); }
+  };
+  const wire = () => {
+    m.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act));
+    const vid = v();
+    vid.onloadedmetadata = () => { vid.currentTime = s.start; };
+    vid.ontimeupdate = () => {
+      const dur = a.duration || vid.duration || 1;
+      $('#ipHead', m).style.left = `${(vid.currentTime / dur) * 100}%`;
+      $('#ipNow', m).textContent = fmtT(vid.currentTime);
+      if ($('#ipLoop', m).checked && (vid.currentTime >= s.end - 0.03 || vid.currentTime < s.start - 0.25)) { vid.currentTime = s.start; }
+    };
+    $('#ipTl', m).onclick = e => { const r = e.currentTarget.getBoundingClientRect(); $('#ipLoop', m).checked = false; vid.currentTime = ((e.clientX - r.left) / r.width) * (a.duration || vid.duration); };
+    $('#ipCats', m).querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { const k = b.dataset.cat; draft.categories.has(k) ? draft.categories.delete(k) : draft.categories.add(k); b.classList.toggle('on'); });
+    $('#ipPl', m).querySelectorAll('[data-pl]').forEach(b => b.onclick = () => { const k = b.dataset.pl; draft.placements.has(k) ? draft.placements.delete(k) : draft.placements.set(k, 70); keepDraw(); });
+    $('#ipTags', m).querySelectorAll('[data-tdel]').forEach(b => b.onclick = () => { draft.tags.splice(Number(b.dataset.tdel), 1); keepDraw(); });
+    $('#ipTagIn', m).onkeydown = e => { if (e.key === 'Enter' && e.target.value.trim()) { draft.tags.push(e.target.value.trim().toLowerCase().slice(0, 40)); keepDraw(); setTimeout(() => $('#ipTagIn', m)?.focus(), 0); } };
+    m.querySelectorAll('[data-asc]').forEach(r => r.oninput = () => { draft.angles[Number(r.dataset.asc)].score = Number(r.value); r.nextElementSibling.textContent = `${r.value}%`; });
+    m.querySelectorAll('[data-adel]').forEach(b => b.onclick = () => { draft.angles.splice(Number(b.dataset.adel), 1); keepDraw(); });
+    $('#ipAddAng', m)?.addEventListener('change', e => { const an = f.angles.find(x => x.id === Number(e.target.value)); if (an) { draft.angles.push({ angle_id: an.id, name: an.name, score: 70, reason: '' }); keepDraw(); } });
+  };
+  // Redraw while keeping the typed text and the video position.
+  const keepDraw = () => {
+    const desc = $('#ipDesc', m)?.value, sem = $('#ipSem', m)?.value, t = v()?.currentTime, sc = $('.insp-right', m)?.scrollTop;
+    s.description = desc ?? s.description; s.semantic = sem ?? s.semantic;
+    draw();
+    if (t != null) { const vid = v(); vid.onloadedmetadata = () => { vid.currentTime = t; }; }
+    $('.insp-right', m).scrollTop = sc || 0;
+  };
+  m.onclick = e => { if (e.target === m) { m.remove(); renderFootageKeep(); } };
+  document.addEventListener('keydown', function k(e) { if (e.key === 'Escape' && document.body.contains(m)) { m.remove(); document.removeEventListener('keydown', k); renderFootageKeep(); } });
+  document.body.appendChild(m);
+  draw();
+}
+// Back to the list after the inspector (keeps the scenes tab and filters).
+function renderFootageKeep() { if (state.tab === 'footage') renderFootage(); }
+
 
 start().catch(() => {});
