@@ -43,6 +43,7 @@ async function showAuth() {
   $('#setupName').classList.toggle('hidden', !needed);
   $('#authHint').textContent = needed ? 'First start: create the admin account.' : "Sign in to your team's creative library.";
   $('#authBtn').textContent = needed ? 'Create admin account' : 'Sign in';
+  $('#authTitle').textContent = needed ? 'Get started' : 'Welcome back';
 }
 
 $('#authForm').addEventListener('submit', async e => {

@@ -9,17 +9,54 @@
 <body>
   <!-- Sign in / first setup -->
   <section id="auth" class="auth hidden">
-    <form class="card" id="authForm">
-      <h1><b>AC</b> Ad creative Centre</h1>
-      <p class="muted" id="authHint">Sign in to your team's creative library.</p>
-      <div id="setupName" class="hidden">
-        <label class="f">Your name</label><input type="text" name="name" autocomplete="name">
+    <!-- Left: a live ad being made (hook → body → CTA, karaoke captions, arrows) -->
+    <div class="showcase" aria-hidden="true">
+      <div class="sc-brand"><b>AC</b> Ad creative Centre</div>
+      <h2 class="sc-title">Turn raw footage into <span>ads that sell</span>.</h2>
+      <p class="sc-sub">Hook · Body · CTA, voice-over, captions and music: ready-to-post videos for your COD products.</p>
+
+      <div class="stage">
+        <div class="chip-f c1">✂️ Auto-split</div>
+        <div class="chip-f c2">🎙 Voice-over</div>
+        <div class="chip-f c3">💬 Captions</div>
+        <div class="chip-f c4">🎵 AI music</div>
+        <div class="chip-f c5">4:5 · 9:16</div>
+
+        <div class="phone">
+          <div class="screen" id="scScreen">
+            <div class="bars"><i data-p="hook"><b></b></i><i data-p="body"><b></b></i><i data-p="cta"><b></b></i></div>
+            <div class="part-tag" id="scTag">HOOK</div>
+            <div class="watch"><div class="band top"></div><div class="dial"><span class="hand h1"></span><span class="hand h2"></span></div><div class="band bottom"></div><div class="spark s1"></div><div class="spark s2"></div><div class="spark s3"></div></div>
+            <div class="cod hidden" id="scCod">PAY ON DELIVERY</div>
+            <div class="cap" id="scCap"></div>
+            <div class="arrows hidden" id="scArrows"><span>⇩</span><span>⇩</span></div>
+          </div>
+        </div>
       </div>
-      <label class="f">Email</label><input type="email" name="email" required autocomplete="username">
-      <label class="f">Password</label><input type="password" name="password" required minlength="8" autocomplete="current-password">
-      <p id="authErr" class="small" style="color:var(--bad)"></p>
-      <button class="btn primary" style="width:100%" id="authBtn">Sign in</button>
-    </form>
+
+      <div class="strip">
+        <div class="frame f-hook"><span>HOOK</span></div><div class="plus">+</div>
+        <div class="frame f-body"><span>BODY</span></div><div class="plus">+</div>
+        <div class="frame f-cta"><span>CTA</span></div><div class="plus">=</div>
+        <div class="frame f-ad"><span>AD</span></div>
+      </div>
+    </div>
+
+    <!-- Right: sign in -->
+    <div class="auth-side">
+      <form class="card" id="authForm">
+        <h1><b>AC</b> <span id="authTitle">Welcome back</span></h1>
+        <p class="muted" id="authHint">Sign in to your team's creative library.</p>
+        <div id="setupName" class="hidden">
+          <label class="f">Your name</label><input type="text" name="name" autocomplete="name">
+        </div>
+        <label class="f">Email</label><input type="email" name="email" required autocomplete="username">
+        <label class="f">Password</label><input type="password" name="password" required minlength="8" autocomplete="current-password">
+        <p id="authErr" class="small" style="color:var(--bad)"></p>
+        <button class="btn primary" style="width:100%" id="authBtn">Sign in</button>
+        <p class="small muted auth-foot">🎬 Footage in · ads out</p>
+      </form>
+    </div>
   </section>
 
   <!-- App -->
@@ -37,6 +74,7 @@
   </section>
 
   <div id="buildbar" class="buildbar hidden"></div>
+  <script src="/login.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
 </html>
