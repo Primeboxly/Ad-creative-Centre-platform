@@ -770,3 +770,12 @@ a.prow + a.prow { border-top: 1px solid #f0f1f5; }
 .insp-mini.add span { font-size: 26px; }
 @media (max-width: 1250px) { .jstep small { display: none; } .jstep { padding: 8px 10px; } .jline { min-width: 12px; } }
 .journey { scrollbar-width: none; } .journey::-webkit-scrollbar { display: none; }
+
+/* Link tiles edited in place */
+.ltile-wrap { position: relative; }
+.ltile-wrap > .ltile { width: 100%; }
+.lt-edit { position: absolute; right: 40px; top: 50%; transform: translateY(-50%); border: 0; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; opacity: 0; transition: opacity .15s; box-shadow: 0 2px 8px rgba(16,18,27,.1); }
+.ltile-wrap:hover .lt-edit { opacity: 1; }
+.ltile.ledit { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(255,77,46,.12); cursor: default; }
+.ltile.ledit input { flex: 1; min-width: 0; border: 0; padding: 8px 4px; box-shadow: none; outline: none; background: transparent; }
+@media (hover: none) { .lt-edit { opacity: 1; } }

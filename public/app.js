@@ -286,10 +286,14 @@ function renderOverview() {
   const ready = creatives.filter(c => c.render === 'ready');
   const making = creatives.filter(c => c.render === 'queued' || c.render === 'rendering').length;
   const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
-  const tile = (u, ic, title, color) => (u
+  // Each link tile can be filled or changed right where it is (click ＋ or ✏️, paste, Enter).
+  const tile = (u, ic, title, color, key) => `<div class="ltile-wrap" data-link="${key}">${u
     ? `<a class="ltile" href="${esc(u)}" target="_blank" rel="noopener"><span class="lt-ic" style="background:${color}">${ic}</span>
-        <div><b>${title}</b><small>${esc(host(u))}</small></div><i>↗</i></a>`
-    : `<button class="ltile empty" data-edit><span class="lt-ic">${ic}</span><div><b>${title}</b><small>＋ Add the link</small></div></button>`);
+        <div><b>${title}</b><small>${esc(host(u))}</small></div><i>↗</i></a><button class="lt-edit" data-ledit title="Change the link">✏️</button>`
+    : `<button class="ltile empty" data-ledit><span class="lt-ic">${ic}</span><div><b>${title}</b><small>＋ Add the link</small></div></button>`}
+    <form class="ltile ledit hidden"><span class="lt-ic" style="background:${color}">${ic}</span>
+      <input type="url" name="url" value="${esc(u)}" placeholder="Paste the ${title} link…">
+      <button class="btn sm primary">Save</button><button type="button" class="btn sm" data-lcancel>✕</button></form></div>`;
   const total = p.markets.length;
   $('#tab').innerHTML = `
     <div class="ov2">
@@ -309,9 +313,9 @@ function renderOverview() {
         <section class="card">
           <div class="sec-h"><div><h2>🔗 Links</h2><small>Store, supplier and research</small></div><button class="btn sm" data-edit>✏️ Edit</button></div>
           <div class="ltiles">
-            ${tile(p.link_product, '🛒', 'Product page', 'linear-gradient(135deg,#ff4d2e,#ff9d00)')}
-            ${tile(p.link_alibaba, '🏭', 'Alibaba / 1688', 'linear-gradient(135deg,#ff7a00,#ffb020)')}
-            ${tile(p.link_amazon, '📦', 'Amazon', 'linear-gradient(135deg,#232f3e,#4a5a70)')}
+            ${tile(p.link_product, '🛒', 'Product page', 'linear-gradient(135deg,#ff4d2e,#ff9d00)', 'link_product')}
+            ${tile(p.link_alibaba, '🏭', 'Alibaba / 1688', 'linear-gradient(135deg,#ff7a00,#ffb020)', 'link_alibaba')}
+            ${tile(p.link_amazon, '📦', 'Amazon', 'linear-gradient(135deg,#232f3e,#4a5a70)', 'link_amazon')}
           </div>
         </section>
 
@@ -348,6 +352,22 @@ function renderOverview() {
       </section>
     </div>`;
   $('#tab').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editProduct(p));
+  $('#tab').querySelectorAll('[data-link]').forEach(w => {
+    const form = $('form', w), input = $('input', form);
+    const view = [...w.children].filter(x => x !== form);
+    const show = on => { form.classList.toggle('hidden', !on); view.forEach(x => x.classList.toggle('hidden', on)); if (on) { input.focus(); input.select(); } };
+    $('[data-ledit]', w).onclick = e => { e.preventDefault(); show(true); };
+    $('[data-lcancel]', form).onclick = () => show(false);
+    input.onkeydown = e => { if (e.key === 'Escape') show(false); };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      try {
+        await api(`/api/products/${p.id}`, { method: 'PATCH', body: { [w.dataset.link]: input.value.trim() } });
+        toast(input.value.trim() ? 'Link saved' : 'Link removed');
+        renderProduct(p.id);
+      } catch (err) { fail(err); }
+    };
+  });
   $('#ovCreate').onclick = () => $('#pCreate').click();
   const notes = $('#ovNotes');
   notes.oninput = () => { $('#ovCount').textContent = `${notes.value.length} chars`; };
