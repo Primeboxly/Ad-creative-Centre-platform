@@ -82,41 +82,53 @@ function route() {
   state.music = null; // reload the music list for the Build bar
   if (view === 'team' && ME.user.role === 'admin') return renderTeam();
   if (view === 'music') return renderMusic();
-  if (view === 'product' && id) { state.tab = tab || 'footage'; return renderProduct(Number(id)); }
+  if (view === 'product' && id) { state.tab = tab || 'overview'; return renderProduct(Number(id)); }
   renderProducts();
 }
 
 // ---------- Products ----------
+const P_STATUS = { idea: '💡 Idea', testing: '🧪 Testing', scaling: '🚀 Scaling', paused: '⏸ Paused' };
+let MARKETS = null;
+const loadMarkets = async () => (MARKETS ??= await api('/api/markets').catch(() => ({})));
+const marketBadges = (list = []) => list.map(m => `<span class="mk" title="${esc(MARKETS?.[m.code]?.name || m.code)}">${esc(m.code)}</span>`).join('');
+const productPic = p => (p.image ? `/media/product/${p.id}/image?v=${encodeURIComponent(p.image)}` : p.cover_clip ? `/media/thumb/clip/${p.cover_clip}` : '');
+const ago = iso => {
+  if (!iso) return '';
+  const d = (Date.now() - new Date(iso.replace(' ', 'T') + 'Z')) / 864e5;
+  return d < 1 ? 'today' : d < 2 ? 'yesterday' : d < 30 ? `${Math.floor(d)} days ago` : iso.slice(0, 10);
+};
+
 async function renderProducts() {
   const v = $('#view');
+  await loadMarkets();
   const list = await api('/api/products').catch(fail) || [];
+  const q = (state.productQuery || '').toLowerCase();
+  const shown = list.filter(p => !q || p.name.toLowerCase().includes(q));
   v.innerHTML = `
-    <div class="row spread">
-      <div><h1>Products</h1><div class="muted">One collection per product: put its footage in, get ad videos out.</div></div>
-      <button class="btn primary" id="newProduct">+ New product</button>
+    <div class="page-head">
+      <div><h1>Products</h1><div class="muted">${list.length} product${list.length === 1 ? '' : 's'} · click one to open its page</div></div>
+      <div class="row"><input type="text" id="pSearch" placeholder="🔍 Search a product" value="${esc(state.productQuery || '')}" style="width:240px">
+        <button class="btn primary" id="newProduct">+ New product</button></div>
     </div>
-    <form id="newForm" class="card hidden" style="margin-top:14px">
+    <form id="newForm" class="card hidden" style="margin-bottom:14px">
       <h2>New product</h2>
-      <label class="f">Product name</label><input type="text" name="name" required placeholder="e.g. Digital Laser Distance Meter 60m">
-      <label class="f">Notes for the AI: benefits, who buys it, price, offer (optional)</label>
-      <textarea name="notes" placeholder="Measures up to 60 m in one click, ±2 mm. For builders, tilers, painters. 45 USD, 2 for 90 USD. Pay on delivery."></textarea>
-      <div class="row" style="margin-top:10px"><button class="btn primary">Create</button><button type="button" class="btn" id="cancelNew">Cancel</button></div>
+      <label class="f">Product name</label><input type="text" name="name" required placeholder="e.g. BESTKANG Women's Luxury Watch">
+      <div class="row" style="margin-top:12px"><button class="btn primary">Create</button><button type="button" class="btn" id="cancelNew">Cancel</button></div>
     </form>
-    <div class="grid products">
-      ${list.map(p => `
-        <div class="card product" data-id="${p.id}">
-          <div class="cover" ${p.cover_clip ? `style="background-image:url('/media/thumb/clip/${p.cover_clip}')"` : ''}>${p.cover_clip ? '' : '🎬'}</div>
-          <div class="info">
-            <div class="name">${esc(p.name)}</div>
-            <div class="chips">
-              <span class="chip hook">${p.hooks} hooks</span><span class="chip body">${p.bodies} bodies</span><span class="chip cta">${p.ctas} CTAs</span>
-              <span class="chip">${p.scripts} scripts</span><span class="chip">${p.creatives} videos</span>
-              ${p.winners ? `<span class="chip win">${p.winners} winners</span>` : ''}
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>
-    ${list.length ? '' : '<div class="empty card" style="margin-top:16px">No product yet. Click <b>+ New product</b> to create the first collection.</div>'}`;
+    <div class="plist card">
+      <div class="prow phead"><div>Product</div><div>Status</div><div>Markets</div><div>Footage</div><div>Scripts</div><div>Ads</div><div>Activity</div></div>
+      ${shown.map(p => `
+        <a class="prow" href="#product/${p.id}">
+          <div class="pname">${productPic(p) ? `<img src="${productPic(p)}" alt="" loading="lazy">` : '<span class="pimg-empty">🎬</span>'}<b>${esc(p.name)}</b></div>
+          <div><span class="pst st-${p.status}">${P_STATUS[p.status] || esc(p.status)}</span></div>
+          <div class="mks">${marketBadges(p.markets) || '<span class="muted small">–</span>'}</div>
+          <div class="small">${p.hooks + p.bodies + p.ctas ? `<span class="chip hook">${p.hooks}</span><span class="chip body">${p.bodies}</span><span class="chip cta">${p.ctas}</span>` : '<span class="muted">–</span>'}</div>
+          <div>${p.scripts || '<span class="muted">–</span>'}</div>
+          <div>${p.creatives ? `${p.creatives}${p.winners ? ` <span class="chip win">🏆 ${p.winners}</span>` : ''}` : '<span class="muted">–</span>'}</div>
+          <div class="muted small">${ago(p.last_activity)}</div>
+        </a>`).join('')}
+      ${shown.length ? '' : `<div class="empty">${list.length ? 'No product matches.' : 'No product yet. Click <b>+ New product</b>.'}</div>`}
+    </div>`;
   $('#newProduct').onclick = () => { $('#newForm').classList.remove('hidden'); $('#newForm [name=name]').focus(); };
   $('#cancelNew').onclick = () => $('#newForm').classList.add('hidden');
   $('#newForm').onsubmit = async e => {
@@ -126,7 +138,8 @@ async function renderProducts() {
       location.hash = `product/${id}`;
     } catch (err) { fail(err); }
   };
-  v.querySelectorAll('.product').forEach(c => c.onclick = () => { location.hash = `product/${c.dataset.id}`; });
+  const ps = $('#pSearch');
+  ps.oninput = () => { state.productQuery = ps.value; const pos = ps.selectionStart; renderProducts().then(() => { const x = $('#pSearch'); x.focus(); x.setSelectionRange(pos, pos); }); };
 }
 
 // ---------- One product ----------
@@ -138,44 +151,201 @@ async function loadProduct(id) {
   for (const k in state.sel) for (const x of state.sel[k]) if (!ids.has(x)) state.sel[k].delete(x);
 }
 
+const TABS = [['overview', 'Overview'], ['footage', 'Footage'], ['scripts', 'Scripts'], ['creatives', 'Creatives'], ['inspiration', 'Inspiration']];
+
 async function renderProduct(id) {
-  try { await loadProduct(id); } catch (e) { fail(e); location.hash = 'products'; return; }
-  const { product: p, clips, scripts, creatives } = state.data;
+  try { await Promise.all([loadProduct(id), loadMarkets()]); } catch (e) { fail(e); location.hash = 'products'; return; }
+  const { product: p, clips, scripts, creatives, inspirations } = state.data;
+  const pic = productPic({ ...p, cover_clip: clips[0]?.id });
+  const counts = { footage: clips.length, scripts: scripts.length, creatives: creatives.length, inspiration: inspirations.length };
+  const link = (url, label) => (url ? `<a class="plink" href="${esc(url)}" target="_blank" rel="noopener">${label} ↗</a>` : '');
   const v = $('#view');
   v.innerHTML = `
-    <span class="back" data-go="products">← All products</span>
-    <div class="row spread">
-      <h1>${esc(p.name)}</h1>
-      ${ME.user.role === 'admin' ? '<button class="btn sm danger" id="delProduct">Delete product</button>' : ''}
-    </div>
-    <div class="notes">
-      <div>
-        <textarea id="notes" placeholder="Notes for the AI: benefits, who buys it, price, offer…">${esc(p.notes)}</textarea>
-        <input type="text" id="banner" maxlength="60" value="${esc(p.banner || '')}" style="margin-top:6px"
-          placeholder="CTA banner on the video, e.g. PAY ON DELIVERY · 680 ZMW (empty = 'Pay on delivery' in the script's language)">
+    <a class="back" href="#products">← All products</a>
+    <div class="phero card">
+      <label class="phero-img" title="Change the picture">${pic ? `<img src="${pic}" alt="">` : '<span>📷<br><small>Add a picture</small></span>'}
+        <input type="file" accept="image/*" class="hidden" id="pImage"></label>
+      <div class="phero-main">
+        <div class="row" style="gap:6px">
+          <select id="pStatus" class="pst-sel st-${p.status}">${Object.entries(P_STATUS).map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          ${p.markets.map(m => `<span class="mk big">${esc(m.code)} <small>${esc(MARKETS[m.code]?.name || '')}</small></span>`).join('')}
+        </div>
+        <h1>${esc(p.name)}</h1>
+        <div class="phero-meta">
+          ${link(p.link_product, '🛒 Product page')}${link(p.link_alibaba, '🏭 Alibaba / 1688')}${link(p.link_amazon, '📦 Amazon')}
+          <span class="muted small">Added ${esc(p.created_at.slice(0, 10))}${state.data.author ? ` by ${esc(state.data.author)}` : ''}</span>
+        </div>
       </div>
-      <button class="btn" id="saveNotes">Save</button>
+      <div class="phero-actions">
+        <button class="btn" id="pEdit">✏️ Edit</button>
+        ${ME.user.role === 'admin' ? '<button class="btn sm ghost danger" id="delProduct">🗑 Delete</button>' : ''}
+      </div>
     </div>
-    <div class="tabs">
-      <a data-tab="footage">Footage (${clips.length})</a>
-      <a data-tab="scripts">Scripts (${scripts.length})</a>
-      <a data-tab="creatives">Creatives (${creatives.length})</a>
-    </div>
+    <div class="tabs">${TABS.map(([k, l]) => `<a data-tab="${k}" class="${k === state.tab ? 'on' : ''}">${l}${counts[k] !== undefined ? ` <span class="cnt">${counts[k]}</span>` : ''}</a>`).join('')}</div>
     <div id="tab"></div>`;
-  v.querySelectorAll('.tabs a').forEach(a => {
-    a.classList.toggle('on', a.dataset.tab === state.tab);
-    a.onclick = () => { location.hash = `product/${id}/${a.dataset.tab}`; };
-  });
-  $('#saveNotes').onclick = async () => {
-    try { await api(`/api/products/${id}`, { method: 'PATCH', body: { notes: $('#notes').value, banner: $('#banner').value } }); toast('Saved'); } catch (e) { fail(e); }
+  v.querySelectorAll('.tabs a').forEach(a => { a.onclick = () => { location.hash = `product/${id}/${a.dataset.tab}`; }; });
+  $('#pStatus').onchange = e => api(`/api/products/${id}`, { method: 'PATCH', body: { status: e.target.value } }).then(() => { e.target.className = `pst-sel st-${e.target.value}`; toast('Status saved'); }, fail);
+  $('#pImage').onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    fetch(`/api/products/${id}/image`, { method: 'POST', body: fd }).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error); renderProduct(id); }), fail).catch(fail);
   };
+  $('#pEdit').onclick = () => editProduct(p);
   const del = $('#delProduct');
   if (del) del.onclick = async () => {
-    if (!confirm(`Delete "${p.name}" with all its footage, scripts and videos? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${p.name}" with all its footage, scripts, videos and inspiration? This cannot be undone.`)) return;
     try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; } catch (e) { fail(e); }
   };
-  ({ footage: renderFootage, scripts: renderScripts, creatives: renderCreatives }[state.tab] || renderFootage)();
+  ({ overview: renderOverview, footage: renderFootage, scripts: renderScripts, creatives: renderCreatives, inspiration: renderInspiration }[state.tab] || renderOverview)();
 }
+
+// Overview: the product's brief, markets, numbers, latest ads and inspiration.
+function renderOverview() {
+  const { product: p, clips, scripts, creatives, inspirations } = state.data;
+  const n = k => clips.filter(c => c.kind === k).length;
+  const byLang = Object.entries(scripts.reduce((a, s) => ({ ...a, [s.language]: (a[s.language] || 0) + 1 }), {}));
+  const ready = creatives.filter(c => c.render === 'ready');
+  const field = (label, html) => `<div class="bf"><div class="bf-l">${label}</div><div class="bf-v">${html}</div></div>`;
+  const url = u => (u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 48))} ↗</a>` : '<span class="muted">Not added</span>');
+  $('#tab').innerHTML = `
+    <div class="ov">
+      <div class="ov-main">
+        <div class="card">
+          <div class="row spread"><h2 style="margin:0">Brief</h2><button class="btn sm" id="ovEdit">✏️ Edit</button></div>
+          <p class="muted small" style="margin:2px 0 12px">Everything the team needs for this product's ads.</p>
+          <div class="bgrid">
+            ${field('Product page', url(p.link_product))}
+            ${field('Alibaba / 1688', url(p.link_alibaba))}
+            ${field('Amazon', url(p.link_amazon))}
+            ${field('CTA banner on videos', p.banner ? esc(p.banner) : '<span class="muted">"Pay on delivery" (default)</span>')}
+          </div>
+          ${field('Notes for the AI (benefits, buyers, price, offer)', `<textarea id="ovNotes" placeholder="e.g. Crystal bracelet, gold finish, gift for her, 680 ZMW, pay on delivery">${esc(p.notes)}</textarea>
+            <div class="row" style="margin-top:6px"><button class="btn sm" id="ovSave">Save notes</button>${p.music_style ? `<span class="small muted">🎵 Music style: ${esc(p.music_style)}</span>` : ''}</div>`)}
+        </div>
+
+        <div class="card">
+          <div class="row spread"><h2 style="margin:0">Latest ads</h2><a class="small" href="#product/${p.id}/creatives">All ${creatives.length} →</a></div>
+          ${ready.length ? `<div class="mini-grid">${ready.slice(0, 6).map(c => `<a href="#product/${p.id}/creatives" class="mini"><img src="/media/thumb/creative/${c.id}" alt="" loading="lazy">
+            <span class="mini-tag ${c.status}">${STATUS_LABEL[c.status]}</span></a>`).join('')}</div>`
+            : `<div class="st-empty" style="margin-top:10px">No ad yet. Go to <a href="#product/${p.id}/footage">Footage</a>, tick clips and click <b>🎬 Create ads</b>.</div>`}
+        </div>
+
+        <div class="card">
+          <div class="row spread"><h2 style="margin:0">Inspiration</h2><a class="small" href="#product/${p.id}/inspiration">${inspirations.length ? `All ${inspirations.length} →` : '+ Add'}</a></div>
+          ${inspirations.length ? `<div class="mini-grid">${inspirations.slice(0, 6).map(i => `<a href="#product/${p.id}/inspiration" class="mini">
+            <img src="${i.kind === 'image' ? `/media/inspiration/${i.id}` : `/media/thumb/insp/${i.id}`}" alt="" loading="lazy">${i.kind === 'video' ? '<span class="mini-play">▶</span>' : ''}</a>`).join('')}</div>`
+            : '<div class="st-empty" style="margin-top:10px">Ads or screenshots you like for this product: the team copies their style.</div>'}
+        </div>
+      </div>
+
+      <div class="ov-side">
+        <div class="card">
+          <div class="row spread"><h2 style="margin:0">Markets</h2><button class="btn sm" id="ovMk">✏️</button></div>
+          ${p.markets.length ? p.markets.map(m => `<div class="mrow"><span class="mk big">${esc(m.code)}</span><b>${esc(MARKETS[m.code]?.name || m.code)}</b>
+            <span class="mprice">${m.price ? `${esc(m.price)} <small>${esc(MARKETS[m.code]?.currency || '')}</small>` : '<span class="muted small">no price</span>'}</span></div>`).join('')
+            : '<div class="st-empty" style="margin-top:10px">Where do you sell it? Click ✏️</div>'}
+        </div>
+        <div class="card">
+          <h2>Numbers</h2>
+          <div class="nums">
+            <div><b>${n('hook')}</b><span class="chip hook">hooks</span></div><div><b>${n('body')}</b><span class="chip body">bodies</span></div><div><b>${n('cta')}</b><span class="chip cta">CTAs</span></div>
+            <div><b>${scripts.length}</b><span class="chip">scripts</span></div><div><b>${creatives.length}</b><span class="chip">ads</span></div><div><b>${creatives.filter(c => c.status === 'winner').length}</b><span class="chip win">winners</span></div>
+          </div>
+          ${byLang.length ? `<div class="small muted" style="margin-top:10px">Scripts: ${byLang.map(([l, k]) => `${k} ${ME.languages[l] || l}`).join(' · ')}</div>` : ''}
+        </div>
+        <div class="card next">
+          <h2>Next step</h2>
+          ${!clips.length ? `<p>Add footage: drop your TikToks in <a href="#product/${p.id}/footage">Auto-split</a>.</p>`
+            : !scripts.length ? `<p>Write scripts with AI in <a href="#product/${p.id}/scripts">Scripts</a> (style BSS).</p>`
+            : !creatives.length ? `<p>Tick clips in <a href="#product/${p.id}/footage">Footage</a> and click <b>🎬 Create ads</b>.</p>`
+            : `<p>Mark ads as <b>Testing</b>, then <b>Winner</b> or <b>Loser</b> in <a href="#product/${p.id}/creatives">Creatives</a>.</p>`}
+        </div>
+      </div>
+    </div>`;
+  $('#ovEdit').onclick = () => editProduct(p);
+  $('#ovMk').onclick = () => editProduct(p);
+  $('#ovSave').onclick = () => api(`/api/products/${p.id}`, { method: 'PATCH', body: { notes: $('#ovNotes').value } }).then(() => toast('Notes saved'), fail);
+}
+
+// Edit: name, links, CTA banner, markets with prices.
+function editProduct(p) {
+  const m = document.createElement('div');
+  m.className = 'studio-wrap center';
+  const rows = () => Object.entries(MARKETS).map(([code, x]) => {
+    const cur = p.markets.find(mm => mm.code === code);
+    return `<label class="mk-opt ${cur ? 'on' : ''}"><input type="checkbox" data-mk="${code}" ${cur ? 'checked' : ''}>
+      <span class="mk big">${code}</span><span class="mk-n">${esc(x.name)}</span>
+      <input type="text" data-price="${code}" placeholder="price ${x.currency}" value="${esc(cur?.price || '')}"></label>`;
+  }).join('');
+  m.innerHTML = `<form class="modal-card" id="peForm">
+    <div class="row spread"><h2 style="margin:0">✏️ Edit product</h2><button type="button" class="btn ghost" data-x>✕</button></div>
+    <label class="f">Name</label><input type="text" name="name" value="${esc(p.name)}" required>
+    <div class="two-col">
+      <div><label class="f">🛒 Product page</label><input type="text" name="link_product" value="${esc(p.link_product)}" placeholder="https://savaro.storeep.com/…"></div>
+      <div><label class="f">🏭 Alibaba / 1688</label><input type="text" name="link_alibaba" value="${esc(p.link_alibaba)}" placeholder="https://www.alibaba.com/…"></div>
+      <div><label class="f">📦 Amazon</label><input type="text" name="link_amazon" value="${esc(p.link_amazon)}" placeholder="https://www.amazon.com/…"></div>
+      <div><label class="f">CTA banner on videos</label><input type="text" name="banner" maxlength="60" value="${esc(p.banner)}" placeholder="PAY ON DELIVERY · 680 ZMW"></div>
+    </div>
+    <label class="f">Markets and prices</label>
+    <div class="mk-grid">${rows()}</div>
+    <div class="row" style="margin-top:16px;justify-content:flex-end"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">Save</button></div>
+  </form>`;
+  document.body.appendChild(m);
+  const close = () => m.remove();
+  m.querySelectorAll('[data-x]').forEach(b => b.onclick = close);
+  m.onclick = e => { if (e.target === m) close(); };
+  m.querySelectorAll('[data-mk]').forEach(cb => cb.onchange = () => cb.closest('.mk-opt').classList.toggle('on', cb.checked));
+  $('#peForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    const markets = [...m.querySelectorAll('[data-mk]:checked')].map(cb => ({ code: cb.dataset.mk, price: m.querySelector(`[data-price="${cb.dataset.mk}"]`).value }));
+    try {
+      await api(`/api/products/${p.id}`, { method: 'PATCH', body: { name: f.name, link_product: f.link_product, link_alibaba: f.link_alibaba, link_amazon: f.link_amazon, banner: f.banner, markets } });
+      close(); toast('Saved'); renderProduct(p.id);
+    } catch (err) { fail(err); }
+  };
+}
+
+// Inspiration: ads and screenshots the team wants to copy the style of.
+function renderInspiration() {
+  const { inspirations } = state.data;
+  const t = $('#tab');
+  t.innerHTML = `
+    <div class="card">
+      <h2>✨ Inspiration</h2>
+      <p class="muted small" style="margin-top:-4px">Ads that work, competitors' videos, screenshots: the style you want for this product's ads.</p>
+      <div class="drop" id="inspDrop">⬆ Drop videos or pictures here or click to upload<input type="file" accept="video/*,image/*" multiple class="hidden"></div>
+      <div class="progress hidden"><div></div></div>
+    </div>
+    <div class="insp-grid">
+      ${inspirations.map(i => `<div class="card insp" data-id="${i.id}">
+        <div class="insp-media">${i.kind === 'image' ? `<img src="/media/inspiration/${i.id}" alt="" loading="lazy" data-zoom>`
+          : `<video src="/media/inspiration/${i.id}" poster="/media/thumb/insp/${i.id}" controls preload="none" playsinline></video>`}</div>
+        <input type="text" value="${esc(i.name)}" data-name>
+        <textarea data-note placeholder="What do you like in it? (hook, captions, music, angle…)">${esc(i.note)}</textarea>
+        <div class="row spread"><span class="small muted">${i.kind === 'video' ? `🎬 ${fmtDur(i.duration)}` : '🖼 picture'} · ${esc(i.author || '')}</span>
+          <button class="btn sm danger" data-del>✕</button></div>
+      </div>`).join('')}
+    </div>
+    ${inspirations.length ? '' : '<div class="empty">Nothing yet. Drop the ads you want to copy.</div>'}`;
+  const d = $('#inspDrop'), input = $('input', d);
+  const send = files => upload(`/api/products/${state.product}/inspiration`, {}, files, d, r => `${r.added} added`);
+  d.onclick = e => { if (e.target !== input) input.click(); };
+  input.onchange = () => send(input.files);
+  d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
+  d.ondragleave = () => d.classList.remove('over');
+  d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); send(e.dataTransfer.files); };
+  t.querySelectorAll('.insp').forEach(el => {
+    const id = Number(el.dataset.id);
+    $('[data-name]', el).onchange = e => api(`/api/inspirations/${id}`, { method: 'PATCH', body: { name: e.target.value } }).catch(fail);
+    $('[data-note]', el).onchange = e => api(`/api/inspirations/${id}`, { method: 'PATCH', body: { note: e.target.value } }).then(() => toast('Saved'), fail);
+    $('[data-del]', el).onclick = () => { if (confirm('Delete this inspiration?')) api(`/api/inspirations/${id}`, { method: 'DELETE' }).then(() => renderProduct(state.product), fail); };
+    const z = $('[data-zoom]', el);
+    if (z) z.onclick = () => { const m = document.createElement('div'); m.className = 'modal'; m.innerHTML = `<img src="${z.src}" style="max-width:92vw;max-height:88vh;border-radius:10px">`; m.onclick = () => m.remove(); document.body.appendChild(m); };
+  });
+}
+
 
 // Footage: three lanes (hook / body / CTA), upload, select clips to build videos.
 const RAW_STATE = { queued: '⏳ Waiting', splitting: '✂️ Cutting…', done: '✅ Done', failed: '❌ Failed' };
@@ -379,8 +549,9 @@ async function openStudio() {
   await loadBuildLists();
   renderStudio();
 }
-function closeStudio() { $('#studio')?.remove(); document.body.classList.remove('noscroll'); }
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#studio')) closeStudio(); });
+// Closes the studio and any other window on top (edit product…).
+function closeStudio() { document.querySelectorAll('.studio-wrap').forEach(x => x.remove()); document.body.classList.remove('noscroll'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.querySelector('.studio-wrap')) closeStudio(); });
 
 const LANG_FLAG = { en: 'EN', sw: 'SW', fr: 'FR' };
 

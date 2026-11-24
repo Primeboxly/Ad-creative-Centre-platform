@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { db, tx } from './db.js';
-import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR, MUSIC_DIR } from './paths.js';
+import { ROOT, CLIPS_DIR, RAW_DIR, RENDERS_DIR, THUMBS_DIR, TMP_DIR, MUSIC_DIR, FILES_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady, extractAudio } from './video.js';
@@ -28,7 +28,8 @@ app.use((req, res, next) => {
 });
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(join(ROOT, 'public')));
+// no-cache: the browser checks for a newer page/script on every load (after each deploy everyone gets the new version).
+app.use(express.static(join(ROOT, 'public'), { setHeaders: res => res.set('Cache-Control', 'no-cache') }));
 
 // Async route errors go to the error handler below.
 const h = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -127,6 +128,27 @@ const productOr404 = id => {
   return p;
 };
 
+// Countries we sell in (COD). Prices are typed per product in its market's currency.
+const MARKETS = {
+  ZM: { name: 'Zambia', currency: 'ZMW' }, ZW: { name: 'Zimbabwe', currency: 'USD' }, KE: { name: 'Kenya', currency: 'KES' },
+  TZ: { name: 'Tanzania', currency: 'TZS' }, UG: { name: 'Uganda', currency: 'UGX' }, RW: { name: 'Rwanda', currency: 'RWF' },
+  MW: { name: 'Malawi', currency: 'MWK' }, MZ: { name: 'Mozambique', currency: 'MZN' }, BW: { name: 'Botswana', currency: 'BWP' },
+  NA: { name: 'Namibia', currency: 'NAD' }, NG: { name: 'Nigeria', currency: 'NGN' }, GH: { name: 'Ghana', currency: 'GHS' },
+  CI: { name: "Côte d'Ivoire", currency: 'XOF' }, SN: { name: 'Senegal', currency: 'XOF' }, CM: { name: 'Cameroon', currency: 'XAF' },
+  CD: { name: 'DR Congo', currency: 'CDF' }, MA: { name: 'Morocco', currency: 'MAD' },
+};
+const STATUSES_P = ['idea', 'testing', 'scaling', 'paused'];
+const marketsOf = p => { try { return JSON.parse(p.markets || '[]'); } catch { return []; } };
+const withMarkets = p => ({ ...p, markets: marketsOf(p) });
+const cleanUrl = v => {
+  const s = str(v, 500);
+  if (!s) return '';
+  const u = /^https?:\/\//i.test(s) ? s : 'https://' + s;
+  try { return new URL(u).href; } catch { throw new HttpError(400, `Not a valid link: ${s}`); }
+};
+
+app.get('/api/markets', (req, res) => res.json(MARKETS));
+
 app.get('/api/products', (req, res) => {
   res.json(db.prepare(`
     SELECT p.*,
@@ -136,8 +158,11 @@ app.get('/api/products', (req, res) => {
       (SELECT COUNT(*) FROM scripts WHERE product_id = p.id) scripts,
       (SELECT COUNT(*) FROM creatives WHERE product_id = p.id) creatives,
       (SELECT COUNT(*) FROM creatives WHERE product_id = p.id AND status = 'winner') winners,
-      (SELECT id FROM clips WHERE product_id = p.id ORDER BY kind = 'hook' DESC, id LIMIT 1) cover_clip
-    FROM products p ORDER BY p.id DESC`).all());
+      (SELECT COUNT(*) FROM inspirations WHERE product_id = p.id) inspirations,
+      (SELECT id FROM clips WHERE product_id = p.id ORDER BY kind = 'hook' DESC, id LIMIT 1) cover_clip,
+      MAX(p.created_at, IFNULL((SELECT MAX(created_at) FROM creatives WHERE product_id = p.id), ''),
+        IFNULL((SELECT MAX(created_at) FROM clips WHERE product_id = p.id), '')) last_activity
+    FROM products p ORDER BY last_activity DESC`).all().map(withMarkets));
 });
 
 app.post('/api/products', (req, res) => {
@@ -150,22 +175,30 @@ app.post('/api/products', (req, res) => {
 app.get('/api/products/:id', (req, res) => {
   const p = productOr404(idParam(req.params.id));
   res.json({
-    product: p,
+    product: withMarkets(p),
     clips: db.prepare(`SELECT c.*, u.name uploader FROM clips c LEFT JOIN users u ON u.id = c.uploaded_by WHERE c.product_id = ? ORDER BY c.kind, c.id`).all(p.id),
     scripts: db.prepare(`SELECT s.*, u.name author FROM scripts s LEFT JOIN users u ON u.id = s.created_by WHERE s.product_id = ? ORDER BY s.id DESC`).all(p.id),
     creatives: db.prepare(`SELECT c.*, u.name author FROM creatives c LEFT JOIN users u ON u.id = c.created_by WHERE c.product_id = ? ORDER BY c.id DESC`).all(p.id),
+    inspirations: db.prepare(`SELECT i.*, u.name author FROM inspirations i LEFT JOIN users u ON u.id = i.created_by WHERE i.product_id = ? ORDER BY i.id DESC`).all(p.id),
     // Full videos being auto-split (and the ones that failed). Finished ones are kept 1 hour to show "done".
     raws: db.prepare(`SELECT id, original_name, status, error, parts FROM raws WHERE product_id = ? AND (status <> 'done' OR created_at > datetime('now', '-1 hour')) ORDER BY id`).all(p.id),
+    author: db.prepare(`SELECT name FROM users WHERE id = ?`).get(p.created_by)?.name || '',
   });
 });
 
 app.patch('/api/products/:id', (req, res) => {
   const p = productOr404(idParam(req.params.id));
-  const name = req.body?.name !== undefined ? str(req.body.name, 200) : p.name;
+  const b = req.body || {};
+  const name = b.name !== undefined ? str(b.name, 200) : p.name;
   if (!name) throw new HttpError(400, 'Product name is required');
-  const notes = req.body?.notes !== undefined ? str(req.body.notes, 4000) : p.notes;
-  const banner = req.body?.banner !== undefined ? str(req.body.banner, 60) : p.banner;
-  db.prepare(`UPDATE products SET name = ?, notes = ?, banner = ? WHERE id = ?`).run(name, notes, banner, p.id);
+  const keep = (k, fn) => (b[k] !== undefined ? fn(b[k]) : p[k]);
+  const status = keep('status', v => { if (!STATUSES_P.includes(v)) throw new HttpError(400, 'Unknown status'); return v; });
+  const markets = b.markets !== undefined ? JSON.stringify((Array.isArray(b.markets) ? b.markets : [])
+    .filter(m => MARKETS[m?.code]).map(m => ({ code: m.code, price: str(m.price, 20) }))
+    .filter((m, i, all) => all.findIndex(x => x.code === m.code) === i)) : p.markets;
+  db.prepare(`UPDATE products SET name = ?, notes = ?, banner = ?, status = ?, markets = ?, link_product = ?, link_alibaba = ?, link_amazon = ? WHERE id = ?`)
+    .run(name, keep('notes', v => str(v, 4000)), keep('banner', v => str(v, 60)), status, markets,
+      keep('link_product', cleanUrl), keep('link_alibaba', cleanUrl), keep('link_amazon', cleanUrl), p.id);
   res.json({ ok: true });
 });
 
@@ -174,12 +207,83 @@ app.delete('/api/products/:id', requireAdmin, (req, res) => {
   const clips = db.prepare(`SELECT id, file FROM clips WHERE product_id = ?`).all(p.id);
   const creatives = db.prepare(`SELECT id, file FROM creatives WHERE product_id = ?`).all(p.id);
   const raws = db.prepare(`SELECT file FROM raws WHERE product_id = ? AND status <> 'splitting'`).all(p.id);
+  const insp = db.prepare(`SELECT id, file FROM inspirations WHERE product_id = ?`).all(p.id);
   db.prepare(`DELETE FROM products WHERE id = ?`).run(p.id);
   for (const c of clips) { removeFile(CLIPS_DIR, c.file); rmSync(thumbOf('clip', c.id), { force: true }); }
   for (const c of creatives) { removeFile(RENDERS_DIR, c.file); rmSync(thumbOf('creative', c.id), { force: true }); }
   for (const r of raws) removeFile(RAW_DIR, r.file);
+  for (const i of insp) { removeFile(FILES_DIR, i.file); rmSync(thumbOf('insp', i.id), { force: true }); }
+  if (p.image) removeFile(FILES_DIR, p.image);
   res.json({ ok: true });
 });
+
+// ---------- Product picture and inspiration files ----------
+const IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+const mediaUpload = multer({
+  dest: TMP_DIR,
+  limits: { fileSize: 300 * 1024 * 1024, files: 20 },
+  fileFilter: (req, file, cb) => cb(null, [...IMAGE_EXT, ...VIDEO_EXT].includes(extname(file.originalname).toLowerCase())),
+});
+
+app.post('/api/products/:id/image', mediaUpload.single('file'), (req, res) => {
+  const f = req.file;
+  try {
+    const p = productOr404(idParam(req.params.id));
+    if (!f || !IMAGE_EXT.includes(extname(f.originalname).toLowerCase())) throw new HttpError(400, `Send a picture (${IMAGE_EXT.join(' ')})`);
+    const name = `product-${p.id}-${randomBytes(6).toString('hex')}${extname(f.originalname).toLowerCase()}`;
+    renameSync(f.path, join(FILES_DIR, name));
+    db.prepare(`UPDATE products SET image = ? WHERE id = ?`).run(name, p.id);
+    if (p.image) removeFile(FILES_DIR, p.image);
+    res.json({ ok: true });
+  } finally { if (f) rmSync(f.path, { force: true }); }
+});
+
+app.post('/api/products/:id/inspiration', mediaUpload.array('files'), async (req, res) => {
+  const files = req.files || [];
+  try {
+    const p = productOr404(idParam(req.params.id));
+    if (!files.length) throw new HttpError(400, 'Send videos or pictures');
+    const added = [];
+    for (const f of files) {
+      const ext = extname(f.originalname).toLowerCase();
+      const kind = IMAGE_EXT.includes(ext) ? 'image' : 'video';
+      const info = kind === 'video' ? await probe(f.path) : null;
+      if (kind === 'video' && !info.hasVideo) continue;
+      const name = `insp-${p.id}-${randomBytes(6).toString('hex')}${ext}`;
+      renameSync(f.path, join(FILES_DIR, name));
+      const id = db.prepare(`INSERT INTO inspirations (product_id, file, kind, name, duration, created_by) VALUES (?,?,?,?,?,?)`)
+        .run(p.id, name, kind, f.originalname.replace(/\.[^.]+$/, '').slice(0, 120), info?.duration || 0, req.user.id).lastInsertRowid;
+      if (kind === 'video') await thumbnail(join(FILES_DIR, name), thumbOf('insp', id));
+      added.push(id);
+    }
+    res.status(201).json({ added: added.length });
+  } finally { files.forEach(f => rmSync(f.path, { force: true })); }
+});
+
+const inspOr404 = id => {
+  const i = db.prepare(`SELECT * FROM inspirations WHERE id = ?`).get(id);
+  if (!i) throw new HttpError(404, 'Inspiration not found');
+  return i;
+};
+app.patch('/api/inspirations/:id', (req, res) => {
+  const i = inspOr404(idParam(req.params.id));
+  db.prepare(`UPDATE inspirations SET name = ?, note = ? WHERE id = ?`)
+    .run(req.body?.name !== undefined ? str(req.body.name, 120) : i.name, req.body?.note !== undefined ? str(req.body.note, 2000) : i.note, i.id);
+  res.json({ ok: true });
+});
+app.delete('/api/inspirations/:id', (req, res) => {
+  const i = inspOr404(idParam(req.params.id));
+  db.prepare(`DELETE FROM inspirations WHERE id = ?`).run(i.id);
+  removeFile(FILES_DIR, i.file);
+  rmSync(thumbOf('insp', i.id), { force: true });
+  res.json({ ok: true });
+});
+app.get('/media/product/:id/image', (req, res) => {
+  const p = productOr404(idParam(req.params.id));
+  if (!p.image) throw new HttpError(404, 'No picture');
+  res.sendFile(join(FILES_DIR, p.image), { headers: { 'Cache-Control': 'private, max-age=3600' } });
+});
+app.get('/media/inspiration/:id', (req, res) => res.sendFile(join(FILES_DIR, inspOr404(idParam(req.params.id)).file)));
 
 // ---------- Footage ----------
 const VIDEO_EXT = ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi', '.3gp'];
@@ -500,7 +604,7 @@ app.get('/media/creative/:id', (req, res) => {
   res.sendFile(join(RENDERS_DIR, c.file));
 });
 app.get('/media/thumb/:type/:id', (req, res) => {
-  if (!['clip', 'creative'].includes(req.params.type)) throw new HttpError(404, 'Not found');
+  if (!['clip', 'creative', 'insp'].includes(req.params.type)) throw new HttpError(404, 'Not found');
   const f = thumbOf(req.params.type, idParam(req.params.id));
   if (!existsSync(f)) throw new HttpError(404, 'No picture');
   res.sendFile(f, { headers: { 'Cache-Control': 'private, max-age=3600' } });

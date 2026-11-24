@@ -115,6 +115,26 @@ addColumn('creatives', 'style', "TEXT NOT NULL DEFAULT 'classic'"); // 'classic'
 addColumn('creatives', 'format', "TEXT NOT NULL DEFAULT '9x16'");   // '9x16' or '4x5'
 addColumn('creatives', 'body_pool', "TEXT NOT NULL DEFAULT ''");    // bss: ids of all the body clips the montage uses (JSON)
 addColumn('scripts', 'style', "TEXT NOT NULL DEFAULT 'classic'");   // how the AI wrote it
+// Product page: picture, links, markets and status.
+addColumn('products', 'image', "TEXT NOT NULL DEFAULT ''");          // file in /files ( = first clip picture)
+addColumn('products', 'link_product', "TEXT NOT NULL DEFAULT ''");   // our product / landing page
+addColumn('products', 'link_alibaba', "TEXT NOT NULL DEFAULT ''");   // Alibaba / 1688 supplier
+addColumn('products', 'link_amazon', "TEXT NOT NULL DEFAULT ''");
+addColumn('products', 'markets', "TEXT NOT NULL DEFAULT '[]'");      // JSON [{ code, price }]
+addColumn('products', 'status', "TEXT NOT NULL DEFAULT 'testing'"); // idea | testing | scaling | paused
+db.exec(`
+-- Inspiration: ads or pictures the team likes for this product (to copy the style).
+CREATE TABLE IF NOT EXISTS inspirations (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('video','image')),
+  name TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  duration REAL NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
 
 export function tx(fn) {
   db.exec('BEGIN');
