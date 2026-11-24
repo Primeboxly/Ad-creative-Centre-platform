@@ -184,6 +184,10 @@ async function loadProduct(id) {
   for (const k in state.sel) for (const x of state.sel[k]) if (!ids.has(x)) state.sel[k].delete(x);
 }
 
+// The source link is Alibaba, 1688 or Amazon: its icon and name follow the link.
+const sourceIcon = u => (/amazon./i.test(u || '') ? '📦' : '🏭');
+const sourceName = u => (/amazon./i.test(u || '') ? 'Amazon' : /1688.com/i.test(u || '') ? '1688' : /alibaba./i.test(u || '') ? 'Alibaba' : 'Alibaba / 1688 / Amazon');
+
 const TABS = [['overview', '✦ Overview'], ['footage', '🎞 Footage'], ['scripts', '📝 Scripts'], ['creatives', '🎬 Creatives'], ['inspiration', '✨ Inspiration']];
 
 // Where the product is on its way to a winning ad.
@@ -225,8 +229,8 @@ async function renderProduct(id) {
           </div>
           <h1>${esc(p.name)}</h1>
           <div class="hero2-links">
-            ${link(p.link_product, '🛒', 'Product page')}${link(p.link_alibaba, '🏭', 'Alibaba / 1688')}${link(p.link_amazon, '📦', 'Amazon')}
-            ${!p.link_product && !p.link_alibaba && !p.link_amazon ? '<button class="glass-chip" id="addLinks">＋ Add links</button>' : ''}
+            ${link(p.link_product, '🛒', 'Product page')}${link(p.link_alibaba, sourceIcon(p.link_alibaba), sourceName(p.link_alibaba))}
+            ${!p.link_product && !p.link_alibaba ? '<button class="glass-chip" id="addLinks">＋ Add links</button>' : ''}
           </div>
           <div class="hero2-by">Added ${esc(p.created_at.slice(0, 10))}${state.data.author ? ` by ${esc(state.data.author)}` : ''}</div>
         </div>
@@ -314,8 +318,7 @@ function renderOverview() {
           <div class="sec-h"><div><h2>🔗 Links</h2><small>Store, supplier and research</small></div><button class="btn sm" data-edit>✏️ Edit</button></div>
           <div class="ltiles">
             ${tile(p.link_product, '🛒', 'Product page', 'linear-gradient(135deg,#ff4d2e,#ff9d00)', 'link_product')}
-            ${tile(p.link_alibaba, '🏭', 'Alibaba / 1688', 'linear-gradient(135deg,#ff7a00,#ffb020)', 'link_alibaba')}
-            ${tile(p.link_amazon, '📦', 'Amazon', 'linear-gradient(135deg,#232f3e,#4a5a70)', 'link_amazon')}
+            ${tile(p.link_alibaba, sourceIcon(p.link_alibaba), 'Alibaba / 1688 / Amazon', /amazon./i.test(p.link_alibaba) ? 'linear-gradient(135deg,#232f3e,#4a5a70)' : 'linear-gradient(135deg,#ff7a00,#ffb020)', 'link_alibaba')}
           </div>
         </section>
 
@@ -390,7 +393,7 @@ const REGIONS = [
 ];
 function editProduct(p) {
   const draft = { name: p.name, status: p.status, banner: p.banner, link_product: p.link_product, link_alibaba: p.link_alibaba,
-    link_amazon: p.link_amazon, markets: p.markets.map(m => ({ ...m })) };
+    markets: p.markets.map(m => ({ ...m })) };
   const pic = productPic({ ...p, cover_clip: state.data?.clips?.[0]?.id });
   const m = document.createElement('div');
   m.className = 'studio-wrap center';
@@ -445,10 +448,7 @@ function editProduct(p) {
           <h4><span class="ic">🔗</span>Links</h4>
           <div class="pe-links">
             ${linkField('link_product', '🛒', 'Product page (our store)', 'https://savaro.storeep.com/products/…')}
-            <div class="pe-grid2">
-              ${linkField('link_alibaba', '🏭', 'Alibaba / 1688', 'https://www.alibaba.com/product-detail/…')}
-              ${linkField('link_amazon', '📦', 'Amazon', 'https://www.amazon.com/dp/…')}
-            </div>
+            ${linkField('link_alibaba', '🏭', 'Alibaba / 1688 / Amazon (where we found the product)', 'https://www.alibaba.com/… · https://detail.1688.com/… · https://www.amazon.com/…')}
           </div>
         </section>
 

@@ -119,7 +119,9 @@ addColumn('scripts', 'style', "TEXT NOT NULL DEFAULT 'classic'");   // how the A
 addColumn('products', 'image', "TEXT NOT NULL DEFAULT ''");          // file in /files ( = first clip picture)
 addColumn('products', 'link_product', "TEXT NOT NULL DEFAULT ''");   // our product / landing page
 addColumn('products', 'link_alibaba', "TEXT NOT NULL DEFAULT ''");   // Alibaba / 1688 supplier
-addColumn('products', 'link_amazon', "TEXT NOT NULL DEFAULT ''");
+addColumn('products', 'link_amazon', "TEXT NOT NULL DEFAULT ''");     // old: now kept in link_alibaba (see below)
+// Alibaba, 1688 and Amazon are one "where we found the product" link (link_alibaba): move old Amazon links there.
+db.exec(`UPDATE products SET link_alibaba = link_amazon, link_amazon = '' WHERE link_alibaba = '' AND link_amazon <> ''`);
 addColumn('products', 'markets', "TEXT NOT NULL DEFAULT '[]'");      // JSON [{ code, price }]
 addColumn('products', 'status', "TEXT NOT NULL DEFAULT 'testing'"); // idea | testing | scaling | paused
 db.exec(`
