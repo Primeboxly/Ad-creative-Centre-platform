@@ -95,7 +95,7 @@ Write ${n} different scripts in ${LANGUAGES[language]}.`;
 export const aiMock = () => process.env.ACC_AI_MOCK === '1';
 
 export async function callJson({ kind, system, content, schema, productId = null, userId = null, effort = 'medium', maxTokens = 32000, mock }) {
-  const { validate, forApi } = await import('./schema.js');
+  const { validate, forApi, trimLists } = await import('./schema.js');
   const { db } = await import('./db.js');
   const log = (ok, usage, ms, error = '') => db.prepare(`INSERT INTO ai_usage (kind, product_id, model, input_tokens, output_tokens, ms, ok, error, user_id) VALUES (?,?,?,?,?,?,?,?,?)`)
     .run(kind, productId, aiMock() ? 'mock' : MODEL, usage?.input_tokens || 0, usage?.output_tokens || 0, ms, ok ? 1 : 0, String(error).slice(0, 500), userId);
@@ -135,7 +135,7 @@ export async function callJson({ kind, system, content, schema, productId = null
     const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('');
     let data;
     try { data = JSON.parse(text); } catch { lastError = 'not JSON'; log(false, res.usage, ms, lastError); continue; }
-    const errs = validate(schema, data);
+    const errs = validate(schema, trimLists(schema, data));
     if (errs.length) { lastError = errs.slice(0, 3).join('; '); log(false, res.usage, ms, lastError); continue; }
     log(true, res.usage, ms);
     return data;

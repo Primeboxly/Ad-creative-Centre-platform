@@ -42,3 +42,16 @@ export function forApi(schema) {
   for (const [k, v] of Object.entries(schema)) if (!LIMITS.has(k)) out[k] = typeof v === 'object' ? forApi(v) : v;
   return out;
 }
+
+// The API cannot enforce list sizes, so the AI sometimes sends a longer list than asked (e.g. 15 items where 10 is the limit).
+// Keep the first ones instead of refusing the whole answer. Changes `value` in place and returns it.
+export function trimLists(schema, value) {
+  if (!schema || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) value.length = schema.maxItems;
+    if (schema.items) value.forEach(v => trimLists(schema.items, v));
+  } else if (schema.properties) {
+    for (const [k, v] of Object.entries(value)) if (schema.properties[k]) trimLists(schema.properties[k], v);
+  }
+  return value;
+}
