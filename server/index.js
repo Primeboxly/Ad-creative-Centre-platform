@@ -149,6 +149,26 @@ const cleanUrl = v => {
 
 app.get('/api/markets', (req, res) => res.json(MARKETS));
 
+// Sidebar: counts, the 6 most recently active products, and what is being made right now.
+app.get('/api/sidebar', (req, res) => {
+  const one = sql => db.prepare(sql).get().n;
+  res.json({
+    products: one(`SELECT COUNT(*) n FROM products`),
+    music: one(`SELECT COUNT(*) n FROM music`),
+    team: one(`SELECT COUNT(*) n FROM users WHERE active = 1`),
+    making: one(`SELECT COUNT(*) n FROM creatives WHERE render IN ('queued','rendering')`),
+    cutting: one(`SELECT COUNT(*) n FROM raws WHERE status IN ('queued','splitting')`),
+    ready: one(`SELECT COUNT(*) n FROM creatives WHERE render = 'ready'`),
+    recent: db.prepare(`
+      SELECT p.id, p.name, p.image,
+        (SELECT id FROM clips WHERE product_id = p.id ORDER BY kind = 'hook' DESC, id LIMIT 1) cover_clip,
+        (SELECT COUNT(*) FROM creatives WHERE product_id = p.id AND render IN ('queued','rendering')) making,
+        MAX(p.created_at, IFNULL((SELECT MAX(created_at) FROM creatives WHERE product_id = p.id), ''),
+          IFNULL((SELECT MAX(created_at) FROM clips WHERE product_id = p.id), '')) last_activity
+      FROM products p ORDER BY last_activity DESC LIMIT 6`).all(),
+  });
+});
+
 app.get('/api/products', (req, res) => {
   res.json(db.prepare(`
     SELECT p.*,

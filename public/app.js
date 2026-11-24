@@ -68,17 +68,48 @@ async function start() {
   try { ME = await api('/api/me'); } catch { return; }
   $('#auth').classList.add('hidden');
   $('#app').classList.remove('hidden');
-  $('#meName').textContent = `${ME.user.name} · ${ME.user.role}`;
+  $('#meName').textContent = ME.user.name;
+  $('#meRole').textContent = ME.user.role === 'admin' ? 'Admin' : 'Team member';
+  $('#meAvatar').textContent = ME.user.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
   $('#navTeam').classList.toggle('hidden', ME.user.role !== 'admin');
   route();
+  refreshSide();
+  clearInterval(state.sidePoll);
+  state.sidePoll = setInterval(refreshSide, 8000);
 }
+
+// ---------- Sidebar: counts, recent products, ads being made ----------
+async function refreshSide() {
+  if ($('#app').classList.contains('hidden')) return;
+  const s = await api('/api/sidebar').catch(() => null);
+  if (!s) return;
+  const cnt = (id, n) => { $(id).textContent = n ? String(n) : ''; };
+  cnt('#cntProducts', s.products); cnt('#cntMusic', s.music); cnt('#cntTeam', s.team);
+  const cur = (location.hash.match(/^#product\/(\d+)/) || [])[1];
+  $('#sideRecent').innerHTML = s.recent.map(p => `<a class="side-p ${String(p.id) === cur ? 'on' : ''}" href="#product/${p.id}">
+      ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty">🎬</span>'}<span>${esc(p.name)}</span>
+      ${p.making ? `<i class="dot" title="${p.making} ads being made"></i>` : ''}</a>`).join('')
+    || '<div class="side-empty">No product yet</div>';
+  const making = s.making + s.cutting;
+  $('#live').innerHTML = making
+    ? `<div class="live-on"><span class="pulse"></span><div><b>${s.making ? `${s.making} ad${s.making > 1 ? 's' : ''} being made` : ''}${s.making && s.cutting ? ' · ' : ''}${s.cutting ? `${s.cutting} video${s.cutting > 1 ? 's' : ''} being cut` : ''}</b>
+        <small>Running in the background</small></div></div>`
+    : `<div class="live-off">✅ All ads are ready${s.ready ? ` · <b>${s.ready}</b> made` : ''}</div>`;
+}
+
+// Phone: open/close the sidebar
+$('#menuBtn').addEventListener('click', () => document.body.classList.toggle('side-open'));
+$('#sideShade').addEventListener('click', () => document.body.classList.remove('side-open'));
+$('#sideNew').addEventListener('click', () => { location.hash = 'products'; state.openNew = true; route(); });
 
 function route() {
   clearInterval(state.poll);
   $('#buildbar').classList.add('hidden');
   closeStudio();
+  document.body.classList.remove('side-open');
   const [view, id, tab] = (location.hash.slice(1) || 'products').split('/');
-  document.querySelectorAll('header nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
+  document.querySelectorAll('.side-nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
+  document.querySelectorAll('.side-p').forEach(a => a.classList.toggle('on', view === 'product' && a.getAttribute('href') === `#product/${id}`));
   state.music = null; // reload the music list for the Build bar
   if (view === 'team' && ME.user.role === 'admin') return renderTeam();
   if (view === 'music') return renderMusic();
@@ -130,6 +161,7 @@ async function renderProducts() {
       ${shown.length ? '' : `<div class="empty">${list.length ? 'No product matches.' : 'No product yet. Click <b>+ New product</b>.'}</div>`}
     </div>`;
   $('#newProduct').onclick = () => { $('#newForm').classList.remove('hidden'); $('#newForm [name=name]').focus(); };
+  if (state.openNew) { state.openNew = false; $('#newProduct').click(); }
   $('#cancelNew').onclick = () => $('#newForm').classList.add('hidden');
   $('#newForm').onsubmit = async e => {
     e.preventDefault();

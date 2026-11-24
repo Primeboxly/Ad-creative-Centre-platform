@@ -88,15 +88,42 @@
 
   <!-- App -->
   <section id="app" class="hidden">
-    <header class="top">
-      <div class="brand" data-go="products"><b>AC</b> Ad creative Centre</div>
-      <nav>
-        <a data-go="products">Products</a>
-        <a data-go="music">Music</a>
-        <a data-go="team" id="navTeam" class="hidden">Team</a>
+    <!-- Phone: a slim bar with the menu button -->
+    <div class="mbar">
+      <button class="mbar-btn" id="menuBtn" aria-label="Menu">☰</button>
+      <div class="side-logo" data-go="products"><span class="logo-mark">AC</span><b>Ad creative Centre</b></div>
+    </div>
+
+    <aside class="side" id="side">
+      <div class="side-logo" data-go="products">
+        <span class="logo-mark">AC</span>
+        <div><b>Ad creative Centre</b><small>COD ads studio</small></div>
+      </div>
+
+      <button class="side-new" id="sideNew">＋ New product</button>
+
+      <nav class="side-nav">
+        <a data-go="products"><span class="ic">📦</span>Products<em id="cntProducts"></em></a>
+        <a data-go="music"><span class="ic">🎵</span>Music<em id="cntMusic"></em></a>
+        <a data-go="team" id="navTeam" class="hidden"><span class="ic">👥</span>Team<em id="cntTeam"></em></a>
       </nav>
-      <div class="me"><span id="meName"></span><button class="btn sm" id="logout">Sign out</button></div>
-    </header>
+
+      <div class="side-sec">
+        <div class="side-h">Recent products</div>
+        <div id="sideRecent"></div>
+      </div>
+
+      <div class="side-bottom">
+        <div class="live" id="live"></div>
+        <div class="me-card">
+          <span class="avatar" id="meAvatar"></span>
+          <div class="me-txt"><b id="meName"></b><small id="meRole"></small></div>
+          <button class="icon-btn" id="logout" title="Sign out" aria-label="Sign out">⎋</button>
+        </div>
+      </div>
+    </aside>
+    <div class="side-shade" id="sideShade"></div>
+
     <main id="view"></main>
   </section>
 
