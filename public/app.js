@@ -76,6 +76,7 @@ async function start() {
 function route() {
   clearInterval(state.poll);
   $('#buildbar').classList.add('hidden');
+  closeStudio();
   const [view, id, tab] = (location.hash.slice(1) || 'products').split('/');
   document.querySelectorAll('header nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
   state.music = null; // reload the music list for the Build bar
@@ -302,11 +303,14 @@ function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = ()
   xhr.send(fd);
 }
 
-// Build options are remembered in this browser.
-const build = Object.assign({ style: 'bss', format: '4x5', script: '', voice: '', voiceName: '', music: 'product', captions: true }, JSON.parse(localStorage.getItem('acc-build') || '{}'));
+// ---------- Create-ads studio ----------
+// Ticking clips shows a big "Create ads" button; it opens the studio, where every choice is a large card.
+// Choices are remembered in this browser (scripts are remembered per product).
+const build = Object.assign({ style: 'bss', format: '4x5', voice: '', voiceName: '', music: 'product', captions: true },
+  JSON.parse(localStorage.getItem('acc-build') || '{}'));
 const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
 
-// Voices (ElevenLabs) and music tracks, loaded once when the Build bar first needs them.
+// Voices (ElevenLabs) and music tracks, loaded once when the studio first needs them.
 async function loadBuildLists() {
   if (!state.music) state.music = await api('/api/music').catch(() => []);
   if (ME.tts && !state.voices) {
@@ -315,124 +319,253 @@ async function loadBuildLists() {
   }
 }
 
-// ✨ Make music: instrumental tracks for this product with ElevenLabs (they show under "AI music of this product").
-async function makeMusic(btn) {
-  const p = state.data.product;
-  const guess = p.music_style || `Upbeat modern instrumental for a short ad about "${p.name}", catchy, positive, clean`;
-  const prompt = window.prompt('Describe the music (no artist or song names). E.g. "elegant luxury pop, soft piano and strings, confident"', guess);
-  if (!prompt) return;
-  btn.disabled = true; btn.textContent = '✨ Making 2 tracks… (1-2 min)';
+// Scripts ticked in the studio (kept per product, only ones that still exist).
+function chosenScripts() {
+  const ids = new Set(state.data.scripts.map(s => s.id));
+  state.studioScripts ??= {};
+  const mine = (state.studioScripts[state.product] || []).filter(id => ids.has(id));
+  state.studioScripts[state.product] = mine;
+  return mine;
+}
+
+// The floating button on the Footage tab.
+function renderBuildBar() {
+  const bb = $('#buildbar');
+  const n = k => state.sel[k].size;
+  if (state.tab !== 'footage' || n('hook') + n('body') + n('cta') === 0) return bb.classList.add('hidden');
+  bb.classList.remove('hidden');
+  bb.innerHTML = `<div class="fab">
+    <div class="fab-sel"><span class="chip hook">${n('hook')} hooks</span><span class="chip body">${n('body')} bodies</span><span class="chip cta">${n('cta')} CTAs</span></div>
+    <button class="btn sm ghost" id="bbClear">Clear</button>
+    <button class="btn primary big" id="bbOpen">🎬 Create ads →</button>
+  </div>`;
+  $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
+  $('#bbOpen').onclick = openStudio;
+}
+
+// How many videos the current choices make, and what is still missing.
+function studioPlan() {
+  const n = k => state.sel[k].size;
+  const sids = chosenScripts();
+  const bss = build.style === 'bss';
+  const tracks = state.music || [];
+  const mine = tracks.filter(m => m.product_id === state.product);
+  const voiceOn = Boolean(sids.length && ME.tts && build.voice);
+  let music = build.music;
+  if (music === 'product' && !mine.length) music = 'none';
+  if (music === 'video' && voiceOn) music = mine.length ? 'product' : 'none';
+  if (music === 'random' && !tracks.length) music = 'none';
+  if (/^\d+$/.test(music) && !tracks.some(m => String(m.id) === music)) music = 'none';
+  const clips = bss ? Math.max(n('hook'), 1) * Math.max(n('cta'), 1) : Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
+  const count = clips * Math.max(sids.length, 1);
+  const missing = [];
+  if (bss && !sids.length) missing.push('a script');
+  if (bss && !build.voice) missing.push('a voice');
+  if (bss && !n('body')) missing.push('body clips');
+  return { n, sids, bss, tracks, mine, voiceOn, music, count, missing };
+}
+
+async function openStudio() {
+  let m = $('#studio');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'studio';
+    m.className = 'studio-wrap';
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) closeStudio(); });
+  }
+  m.innerHTML = '<div class="studio"><div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Loading voices and music…</div></div>';
+  document.body.classList.add('noscroll');
+  await loadBuildLists();
+  renderStudio();
+}
+function closeStudio() { $('#studio')?.remove(); document.body.classList.remove('noscroll'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#studio')) closeStudio(); });
+
+const LANG_FLAG = { en: 'EN', sw: 'SW', fr: 'FR' };
+
+function renderStudio() {
+  const m = $('#studio');
+  if (!m) return;
+  const P = studioPlan();
+  const scripts = state.data.scripts;
+  const voices = state.voices || [];
+  const q = (state.voiceQuery || '').toLowerCase();
+  const shownVoices = voices.filter(v => !q || (v.name + ' ' + v.info).toLowerCase().includes(q));
+  const langs = [...new Set(scripts.map(s => s.language))];
+  const card = (on, inner, attrs = '', disabled = false) =>
+    `<button type="button" class="opt ${on ? 'on' : ''}" ${disabled ? 'disabled' : ''} ${attrs}>${inner}<span class="tick">✓</span></button>`;
+  const v = voices.find(x => x.id === build.voice);
+
+  m.innerHTML = `<div class="studio" role="dialog" aria-label="Create ads">
+    <header class="st-head">
+      <div><h2>🎬 Create ads</h2>
+        <div class="st-sel"><span class="chip hook">${P.n('hook')} hooks</span><span class="chip body">${P.n('body')} bodies</span><span class="chip cta">${P.n('cta')} CTAs</span></div></div>
+      <button class="btn ghost" id="stClose" aria-label="Close">✕</button>
+    </header>
+
+    <div class="st-body">
+      <section class="st-sec">
+        <h3><i>1</i> Style</h3>
+        <div class="opts two">
+          ${card(P.bss, `<div class="ill ill-bss"><b></b><b></b><b></b><b></b><span>the <em>perfect</em> gift</span></div>
+            <div class="opt-t">BSS montage</div><div class="opt-d">One voice, a new shot every ~2 s, karaoke captions, arrows on the CTA. Like your inspiration ads.</div>`, 'data-style="bss"')}
+          ${card(!P.bss, `<div class="ill ill-classic"><b class="h">HOOK</b><b class="b">BODY</b><b class="c">CTA</b></div>
+            <div class="opt-t">Classic</div><div class="opt-d">Hook clip + body clip + CTA clip, each combination is one ad.</div>`, 'data-style="classic"')}
+        </div>
+      </section>
+
+      ${P.bss ? `<section class="st-sec">
+        <h3><i>2</i> Format</h3>
+        <div class="opts two small">
+          ${card(build.format === '4x5', '<div class="ratio r45"></div><div class="opt-t">4:5</div><div class="opt-d">Feed (Facebook, Instagram)</div>', 'data-format="4x5"')}
+          ${card(build.format === '9x16', '<div class="ratio r916"></div><div class="opt-t">9:16</div><div class="opt-d">Reels, Stories, TikTok</div>', 'data-format="9x16"')}
+        </div>
+      </section>` : ''}
+
+      <section class="st-sec">
+        <h3><i>${P.bss ? 3 : 2}</i> Script <small>${P.sids.length ? `${P.sids.length} chosen: each one makes its own ads` : P.bss ? 'choose at least one' : 'optional'}</small></h3>
+        ${scripts.length ? `<div class="quick">${langs.map(l => `<button type="button" class="btn sm" data-alllang="${l}">All ${ME.languages[l] || l}</button>`).join('')}
+          <button type="button" class="btn sm" data-noscripts>None</button></div>
+          <div class="opts scripts-grid">${scripts.map(s => card(P.sids.includes(s.id), `
+            <div class="sc-top"><span class="chip">${LANG_FLAG[s.language] || esc(s.language)}</span>${s.style === 'bss' ? '<span class="chip win">BSS</span>' : ''}${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
+            <div class="sc-hook">“${esc(s.hook)}”</div>
+            <div class="opt-d">${esc(s.body.slice(0, 90))}${s.body.length > 90 ? '…' : ''}</div>`, `data-script="${s.id}"`)).join('')}</div>`
+          : `<div class="st-empty">No script yet. <a href="#product/${state.product}/scripts" data-close>✨ Write scripts with AI</a> (choose the style BSS).</div>`}
+      </section>
+
+      <section class="st-sec">
+        <h3><i>${P.bss ? 4 : 3}</i> Voice ${v ? `<small>${esc(v.name)}</small>` : ''}</h3>
+        ${!ME.tts ? '<div class="st-empty">Voice-over is not set up on the server (ELEVENLABS_API_KEY).</div>'
+          : state.voicesError ? `<div class="st-empty bad">⚠ ${esc(state.voicesError)}</div>`
+          : `<div class="quick"><input type="text" id="stVoiceQ" placeholder="Search voices: female, african, warm…" value="${esc(state.voiceQuery || '')}">
+              ${P.bss ? '' : `<button type="button" class="btn sm" data-novoice>No voice</button>`}
+              <button type="button" class="btn sm" data-paste>✏️ Voice ID</button></div>
+            <div class="opts voices">${shownVoices.map(x => card(build.voice === x.id, `
+              <div class="vo-row"><span class="vo-av">${esc(x.name.slice(0, 1))}</span>
+                <div><div class="opt-t">${esc(x.name)}</div><div class="opt-d">${esc(x.info || x.category || '')}</div></div></div>
+              ${x.preview ? `<span class="play" data-preview="${esc(x.preview)}" title="Listen">▶</span>` : ''}`, `data-voice="${esc(x.id)}"`, !P.sids.length)).join('')
+              || '<div class="st-empty">No voice matches.</div>'}</div>
+            ${P.sids.length ? '' : '<p class="small muted">Choose a script first: the voice reads it.</p>'}`}
+      </section>
+
+      <section class="st-sec">
+        <h3><i>${P.bss ? 5 : 4}</i> Music</h3>
+        <div class="opts music">
+          ${card(P.music === 'product', `<div class="mu-ic">✨</div><div class="opt-t">AI music of this product</div><div class="opt-d">${P.mine.length ? `${P.mine.length} tracks, a different one per ad` : 'None yet: make some below'}</div>`, 'data-music="product"', !P.mine.length)}
+          ${card(P.music === 'none', '<div class="mu-ic">🔇</div><div class="opt-t">No music</div><div class="opt-d">Voice only</div>', 'data-music="none"')}
+          ${card(P.music === 'video', `<div class="mu-ic">🎬</div><div class="opt-t">TikTok sound</div><div class="opt-d">${P.voiceOn ? 'Not with a voice (it has someone speaking)' : 'The original sound of the clips'}</div>`, 'data-music="video"', P.voiceOn)}
+          ${card(P.music === 'random', `<div class="mu-ic">🎵</div><div class="opt-t">Library mix</div><div class="opt-d">${P.tracks.length} tracks, random per ad</div>`, 'data-music="random"', !P.tracks.length)}
+        </div>
+        ${ME.tts ? `<form class="make-music" id="stMake">
+          <input type="text" name="prompt" placeholder="Describe new music: elegant luxury pop, soft piano, confident…" value="${esc(state.data.product.music_style || '')}">
+          <button class="btn">✨ Make 2 tracks</button></form>` : ''}
+      </section>
+
+      ${P.bss ? '' : `<section class="st-sec">
+        <h3><i>5</i> Captions</h3>
+        <label class="switch"><input type="checkbox" id="stCaptions" ${build.captions ? 'checked' : ''} ${P.sids.length && ME.captions ? '' : 'disabled'}><span></span> Write the script on the video and add the CTA banner</label>
+      </section>`}
+    </div>
+
+    <footer class="st-foot">
+      <div class="st-sum">
+        <div class="st-count"><b>${P.count}</b> ad${P.count === 1 ? '' : 's'}</div>
+        <div class="small muted">${[P.bss ? `BSS · ${build.format === '9x16' ? '9:16' : '4:5'}` : 'Classic · 9:16',
+          P.sids.length ? `${P.sids.length} script${P.sids.length > 1 ? 's' : ''}` : 'no script', v ? `🎙 ${esc(v.name)}` : '',
+          { product: '✨ AI music', none: 'no music', video: '🎬 TikTok sound', random: '🎵 library mix' }[P.music] || '🎵 one track'].filter(Boolean).join(' · ')}</div>
+      </div>
+      ${P.missing.length ? `<div class="st-miss">Choose ${P.missing.join(', ')}</div>` : ''}
+      <button class="btn primary big" id="stCreate" ${P.missing.length ? 'disabled' : ''}>Create ${P.count} ad${P.count === 1 ? '' : 's'} →</button>
+    </footer>
+  </div>`;
+
+  // Choices
+  const set = (k, v2) => { build[k] = v2; saveBuild(); renderStudio(); };
+  $('#stClose').onclick = closeStudio;
+  m.querySelectorAll('[data-close]').forEach(a => a.addEventListener('click', closeStudio));
+  m.querySelectorAll('[data-style]').forEach(b => b.onclick = () => set('style', b.dataset.style));
+  m.querySelectorAll('[data-format]').forEach(b => b.onclick = () => set('format', b.dataset.format));
+  m.querySelectorAll('[data-script]').forEach(b => b.onclick = () => {
+    const id = Number(b.dataset.script), list = chosenScripts();
+    state.studioScripts[state.product] = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
+    renderStudio();
+  });
+  m.querySelectorAll('[data-alllang]').forEach(b => b.onclick = () => {
+    state.studioScripts[state.product] = scripts.filter(s => s.language === b.dataset.alllang).map(s => s.id);
+    renderStudio();
+  });
+  m.querySelector('[data-noscripts]')?.addEventListener('click', () => { state.studioScripts[state.product] = []; renderStudio(); });
+  m.querySelectorAll('[data-voice]').forEach(b => b.onclick = e => {
+    if (e.target.closest('[data-preview]')) return;
+    build.voiceName = voices.find(x => x.id === b.dataset.voice)?.name || '';
+    set('voice', b.dataset.voice);
+  });
+  m.querySelector('[data-novoice]')?.addEventListener('click', () => set('voice', ''));
+  m.querySelector('[data-paste]')?.addEventListener('click', () => {
+    const id = (prompt('ElevenLabs voice ID (ElevenLabs: Voices → a voice → ⋯ → Copy voice ID):') || '').trim();
+    if (id) { build.voiceName = 'Voice ' + id.slice(0, 8); set('voice', id); }
+  });
+  const vq = $('#stVoiceQ');
+  if (vq) vq.oninput = () => {
+    state.voiceQuery = vq.value;
+    const pos = vq.selectionStart;
+    renderStudio();
+    const again = $('#stVoiceQ'); again.focus(); again.setSelectionRange(pos, pos);
+  };
+  // Voice previews
+  let audio = null;
+  m.querySelectorAll('[data-preview]').forEach(p => p.onclick = e => {
+    e.stopPropagation();
+    if (audio) { audio.pause(); m.querySelectorAll('.play.on').forEach(x => { x.classList.remove('on'); x.textContent = '▶'; }); }
+    if (audio && audio.src === p.dataset.preview) { audio = null; return; }
+    audio = new Audio(p.dataset.preview);
+    audio.play().catch(() => {});
+    p.classList.add('on'); p.textContent = '❚❚';
+    audio.onended = () => { p.classList.remove('on'); p.textContent = '▶'; };
+  });
+  m.querySelectorAll('[data-music]').forEach(b => b.onclick = () => set('music', b.dataset.music));
+  const cap = $('#stCaptions');
+  if (cap) cap.onchange = () => set('captions', cap.checked);
+  const mk = $('#stMake');
+  if (mk) mk.onsubmit = e => { e.preventDefault(); makeMusic(mk); };
+  $('#stCreate').onclick = createAds;
+}
+
+// ✨ Make music: 2 instrumental tracks for this product with ElevenLabs.
+async function makeMusic(form) {
+  const prompt = form.prompt.value.trim();
+  if (prompt.length < 3) return fail(new Error('Describe the music first (style and mood)'));
+  const btn = $('button', form);
+  btn.disabled = true; btn.textContent = '✨ Making… (1-2 min)';
   try {
-    await api('/api/music/generate', { method: 'POST', body: { prompt, count: 2, seconds: 30, product_id: p.id } });
+    await api('/api/music/generate', { method: 'POST', body: { prompt, count: 2, seconds: 30, product_id: state.product } });
     state.data.product.music_style = prompt;
     state.music = null;
     build.music = 'product'; saveBuild();
     toast('2 music tracks made for this product');
     await loadBuildLists();
   } catch (e) { fail(e); }
-  renderBuildBar();
+  renderStudio();
 }
 
-// "all:sw" = every Swahili script, a number = one script, '' = clips only.
-function chosenScripts() {
-  const scripts = state.data.scripts;
-  if (build.script.startsWith('all:')) return scripts.filter(s => s.language === build.script.slice(4)).map(s => s.id);
-  return scripts.some(s => String(s.id) === build.script) ? [Number(build.script)] : [];
+async function createAds() {
+  const P = studioPlan();
+  const btn = $('#stCreate');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const v = (state.voices || []).find(x => x.id === build.voice) || (build.voice ? { name: build.voiceName } : null);
+    await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
+      hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: P.sids,
+      voice_id: P.sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
+      music: P.music, captions: build.captions, style: build.style, format: build.format } });
+    state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
+    closeStudio();
+    toast(`${P.count} ad(s) are being made`);
+    location.hash = `product/${state.product}/creatives`;
+  } catch (e) { fail(e); btn.disabled = false; btn.textContent = `Create ${P.count} ads →`; }
 }
 
-function renderBuildBar() {
-  const bb = $('#buildbar');
-  const n = k => state.sel[k].size;
-  const any = n('hook') + n('body') + n('cta') > 0;
-  if (state.tab !== 'footage' || !any) return bb.classList.add('hidden');
-  if (!state.music || (ME.tts && !state.voices)) loadBuildLists().then(() => { if (state.tab === 'footage') renderBuildBar(); });
-  const scripts = state.data.scripts;
-  const sids = chosenScripts();
-  const clipsCount = Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
-  const bss = build.style === 'bss';
-  const count = (bss ? Math.max(n('hook'), 1) * Math.max(n('cta'), 1) : clipsCount) * Math.max(sids.length, 1);
-  const langs = [...new Set(scripts.map(s => s.language))];
-  const voices = state.voices || [];
-  const tracks = state.music || [];
-  const mine = tracks.filter(m => m.product_id === state.product);       // AI music made for this product
-  const voiceOn = Boolean(sids.length && ME.tts && build.voice);
-  // The music actually used: falls back when the saved choice is not possible here.
-  let music = build.music;
-  if (music === 'product' && !mine.length) music = 'none';
-  if (music === 'video' && voiceOn) music = mine.length ? 'product' : 'none';
-  if (music === 'random' && !tracks.length) music = 'none';
-  if (/^\d+$/.test(music) && !tracks.some(m => String(m.id) === music)) music = 'none';
-  bb.classList.remove('hidden');
-  bb.innerHTML = `<div class="inner">
-    <label class="bbf">🎨 <select id="bbStyle">
-      <option value="bss" ${bss ? 'selected' : ''}>BSS montage</option>
-      <option value="classic" ${bss ? '' : 'selected'}>Classic</option>
-    </select></label>
-    ${bss ? `<label class="bbf"><select id="bbFormat"><option value="4x5" ${build.format === '4x5' ? 'selected' : ''}>4:5</option><option value="9x16" ${build.format === '9x16' ? 'selected' : ''}>9:16</option></select></label>` : ''}
-    <div class="formula">${bss
-      ? `<b>${n('hook')}</b> H × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''} (montage of <b>${n('body')}</b> bodies)`
-      : `<b>${n('hook')}</b> H × <b>${n('body')}</b> B × <b>${n('cta')}</b> CTA${sids.length > 1 ? ` × <b>${sids.length}</b> scripts` : ''}`}
-      = <b>${count}</b> video${count === 1 ? '' : 's'}</div>
-    <label class="bbf">📝 <select id="bbScript">
-      <option value="">No script (clips only)</option>
-      ${langs.map(l => `<option value="all:${l}" ${build.script === `all:${l}` ? 'selected' : ''}>All ${ME.languages[l] || l} scripts (${scripts.filter(s => s.language === l).length})</option>`).join('')}
-      ${scripts.map(s => `<option value="${s.id}" ${build.script === String(s.id) ? 'selected' : ''}>${esc(s.language.toUpperCase())} · ${esc(s.angle || 'script')} · ${esc(s.hook.slice(0, 40))}</option>`).join('')}
-    </select></label>
-    <label class="bbf" title="${ME.tts ? '' : 'Add ELEVENLABS_API_KEY on the server to turn this on'}">🎙 <select id="bbVoice" ${ME.tts && sids.length ? '' : 'disabled'}>
-      <option value="">${ME.tts ? (state.voices && !voices.length ? (state.voicesError ? '⚠ Voices not loaded' : 'No voices found') : 'No voice') : 'Voice: not set up'}</option>
-      ${voices.map(v => `<option value="${esc(v.id)}" ${build.voice === v.id ? 'selected' : ''}>${esc(v.name)}${v.info ? ` · ${esc(v.info)}` : ''}</option>`).join('')}
-      ${build.voice && !voices.some(v => v.id === build.voice) ? `<option value="${esc(build.voice)}" selected>${esc(build.voiceName || 'Voice ID ' + build.voice)}</option>` : ''}
-      ${ME.tts ? '<option value="__paste">✏️ Paste a voice ID…</option>' : ''}
-    </select></label>
-    <label class="bbf">🎵 <select id="bbMusic">
-      <option value="product" ${music === 'product' ? 'selected' : ''} ${mine.length ? '' : 'disabled'}>✨ AI music of this product (${mine.length})</option>
-      <option value="none" ${music === 'none' ? 'selected' : ''}>No music</option>
-      <option value="video" ${music === 'video' ? 'selected' : ''} ${voiceOn ? 'disabled' : ''}>🎬 Sound of the TikTok video${voiceOn ? ' (not with a voice)' : ''}</option>
-      <option value="random" ${music === 'random' ? 'selected' : ''} ${tracks.length ? '' : 'disabled'}>Random library track (${tracks.length})</option>
-      ${tracks.map(m => `<option value="${m.id}" ${music === String(m.id) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
-    </select></label>
-    ${ME.tts ? '<button class="btn sm" id="bbMakeMusic" title="Make instrumental music for this product with ElevenLabs">✨ Make music</button>' : ''}
-    ${bss ? '' : `<label class="bbf"><input type="checkbox" id="bbCaptions" ${build.captions ? 'checked' : ''} ${sids.length && ME.captions ? '' : 'disabled'}> Captions</label>`}
-    <button class="btn sm" id="bbClear" style="margin-left:auto">Clear</button>
-    <button class="btn primary" id="bbBuild">Build ${count} video${count === 1 ? '' : 's'}</button>
-  </div>`;
-  $('#bbScript').onchange = e => { build.script = e.target.value; saveBuild(); renderBuildBar(); };
-  $('#bbVoice').onchange = e => {
-    if (e.target.value === '__paste') {
-      const id = (prompt('ElevenLabs voice ID (in ElevenLabs: Voices → a voice → ⋯ → Copy voice ID):') || '').trim();
-      if (id) { build.voice = id; build.voiceName = 'Voice ' + id.slice(0, 8); }
-    } else {
-      build.voice = e.target.value;
-      build.voiceName = voices.find(v => v.id === build.voice)?.name || '';
-    }
-    saveBuild(); renderBuildBar();
-  };
-  if (state.voicesError) $('#bbVoice').title = state.voicesError;
-  $('#bbMusic').onchange = e => { build.music = e.target.value; saveBuild(); };
-  const mk = $('#bbMakeMusic');
-  if (mk) mk.onclick = () => makeMusic(mk);
-  const cap = $('#bbCaptions');
-  if (cap) cap.onchange = e => { build.captions = e.target.checked; saveBuild(); };
-  $('#bbStyle').onchange = e => { build.style = e.target.value; saveBuild(); renderBuildBar(); };
-  const fm = $('#bbFormat');
-  if (fm) fm.onchange = e => { build.format = e.target.value; saveBuild(); };
-  $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
-  if (state.voicesError && !state.voicesErrorShown) { state.voicesErrorShown = true; fail(new Error('Voices: ' + state.voicesError)); }
-  $('#bbBuild').onclick = async () => {
-    if (bss && (!sids.length || !build.voice)) return fail(new Error('BSS needs a script (📝) and a voice (🎙)'));
-    if (bss && !n('body')) return fail(new Error('BSS: tick the body clips for the montage'));
-    const v = voices.find(x => x.id === build.voice) || (build.voice ? { name: build.voiceName } : null);
-    try {
-      await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
-        hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: sids,
-        voice_id: sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
-        music, captions: build.captions, style: build.style, format: build.format } });
-      state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
-      toast(`${count} video(s) are being made`);
-      location.hash = `product/${state.product}/creatives`;
-    } catch (e) { fail(e); }
-  };
-}
 
 // Scripts: AI writer + list.
 function renderScripts() {

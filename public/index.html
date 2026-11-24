@@ -9,36 +9,63 @@
 <body>
   <!-- Sign in / first setup -->
   <section id="auth" class="auth hidden">
-    <!-- Left: a live ad being made (hook → body → CTA, karaoke captions, arrows) -->
+    <!-- Left: how an ad is made, step by step (animated by login.js) -->
     <div class="showcase" aria-hidden="true">
       <div class="sc-brand"><b>AC</b> Ad creative Centre</div>
-      <h2 class="sc-title">Turn raw footage into <span>ads that sell</span>.</h2>
-      <p class="sc-sub">Hook · Body · CTA, voice-over, captions and music: ready-to-post videos for your COD products.</p>
+      <h2 class="sc-title">From a TikTok to a <span>winning ad</span>,<br>in 5 steps.</h2>
 
-      <div class="stage">
-        <div class="chip-f c1">✂️ Auto-split</div>
-        <div class="chip-f c2">🎙 Voice-over</div>
-        <div class="chip-f c3">💬 Captions</div>
-        <div class="chip-f c4">🎵 AI music</div>
-        <div class="chip-f c5">4:5 · 9:16</div>
+      <ol class="steps" id="scSteps">
+        <li data-s="0"><i>1</i><div><b>Footage</b><small>Drop your TikToks</small></div></li>
+        <li data-s="1"><i>2</i><div><b>Auto-split</b><small>Hook · Body · CTA</small></div></li>
+        <li data-s="2"><i>3</i><div><b>AI script</b><small>EN · SW · FR</small></div></li>
+        <li data-s="3"><i>4</i><div><b>Voice &amp; music</b><small>ElevenLabs</small></div></li>
+        <li data-s="4"><i>5</i><div><b>Your ads</b><small>Captions · COD</small></div></li>
+        <span class="steps-line"><span id="scLine"></span></span>
+      </ol>
 
-        <div class="phone">
-          <div class="screen" id="scScreen">
-            <div class="bars"><i data-p="hook"><b></b></i><i data-p="body"><b></b></i><i data-p="cta"><b></b></i></div>
-            <div class="part-tag" id="scTag">HOOK</div>
-            <div class="watch"><div class="band top"></div><div class="dial"><span class="hand h1"></span><span class="hand h2"></span></div><div class="band bottom"></div><div class="spark s1"></div><div class="spark s2"></div><div class="spark s3"></div></div>
-            <div class="cod hidden" id="scCod">PAY ON DELIVERY</div>
-            <div class="cap" id="scCap"></div>
-            <div class="arrows hidden" id="scArrows"><span>⇩</span><span>⇩</span></div>
+      <div class="theater">
+        <!-- 1. Footage -->
+        <div class="act" data-a="0">
+          <div class="drop-zone">
+            <div class="tok t1"><span>▶</span><em>TikTok #1</em></div>
+            <div class="tok t2"><span>▶</span><em>TikTok #2</em></div>
+            <div class="tok t3"><span>▶</span><em>TikTok #3</em></div>
+            <div class="dz-label">⬆ Drop full videos</div>
           </div>
         </div>
-      </div>
-
-      <div class="strip">
-        <div class="frame f-hook"><span>HOOK</span></div><div class="plus">+</div>
-        <div class="frame f-body"><span>BODY</span></div><div class="plus">+</div>
-        <div class="frame f-cta"><span>CTA</span></div><div class="plus">=</div>
-        <div class="frame f-ad"><span>AD</span></div>
+        <!-- 2. Auto-split -->
+        <div class="act" data-a="1">
+          <div class="film"><div class="seg sh"><b>HOOK</b><small>0–3 s</small></div><div class="seg sb"><b>BODY</b><small>the demo</small></div><div class="seg sc"><b>CTA</b><small>last 3 s</small></div></div>
+          <div class="scissors">✂️</div>
+          <p class="act-note">Cut on scene changes, sorted in 3 lanes</p>
+        </div>
+        <!-- 3. AI script -->
+        <div class="act" data-a="2">
+          <div class="script-card">
+            <div class="sl"><span class="tag th">HOOK</span><p class="typed" data-t="Struggling to find the perfect gift?"></p></div>
+            <div class="sl"><span class="tag tb">BODY</span><p class="typed" data-t="Crystal bracelet, gold finish, she'll love it…"></p></div>
+            <div class="sl"><span class="tag tc">CTA</span><p class="typed" data-t="Order now, pay on delivery!"></p></div>
+          </div>
+        </div>
+        <!-- 4. Voice & music -->
+        <div class="act" data-a="3">
+          <div class="wave"><i style="--d:0s;--h:30%"></i><i style="--d:0.09s;--h:67%"></i><i style="--d:0.18s;--h:44%"></i><i style="--d:0.27s;--h:81%"></i><i style="--d:0.36s;--h:58%"></i><i style="--d:0.44999999999999996s;--h:35%"></i><i style="--d:0.54s;--h:72%"></i><i style="--d:0s;--h:49%"></i><i style="--d:0.09s;--h:86%"></i><i style="--d:0.18s;--h:63%"></i><i style="--d:0.27s;--h:40%"></i><i style="--d:0.36s;--h:77%"></i><i style="--d:0.44999999999999996s;--h:54%"></i><i style="--d:0.54s;--h:31%"></i><i style="--d:0s;--h:68%"></i><i style="--d:0.09s;--h:45%"></i><i style="--d:0.18s;--h:82%"></i><i style="--d:0.27s;--h:59%"></i><i style="--d:0.36s;--h:36%"></i><i style="--d:0.44999999999999996s;--h:73%"></i><i style="--d:0.54s;--h:50%"></i><i style="--d:0s;--h:87%"></i><i style="--d:0.09s;--h:64%"></i><i style="--d:0.18s;--h:41%"></i><i style="--d:0.27s;--h:78%"></i><i style="--d:0.36s;--h:55%"></i><i style="--d:0.44999999999999996s;--h:32%"></i><i style="--d:0.54s;--h:69%"></i></div>
+          <div class="vm"><span>🎙 Warm female voice</span><span>🎵 Elegant luxury pop</span></div>
+        </div>
+        <!-- 5. The ad -->
+        <div class="act" data-a="4">
+          <div class="phone">
+            <div class="screen" id="scScreen">
+              <div class="bars"><i data-p="hook"><b></b></i><i data-p="body"><b></b></i><i data-p="cta"><b></b></i></div>
+              <div class="part-tag" id="scTag">HOOK</div>
+              <div class="watch"><div class="band top"></div><div class="dial"><span class="hand h1"></span><span class="hand h2"></span></div><div class="band bottom"></div><div class="spark s1"></div><div class="spark s2"></div><div class="spark s3"></div></div>
+              <div class="cod hidden" id="scCod">PAY ON DELIVERY</div>
+              <div class="cap" id="scCap"></div>
+              <div class="arrows hidden" id="scArrows"><span>⇩</span><span>⇩</span></div>
+            </div>
+          </div>
+          <div class="ready">✅ <b>27 ads</b> ready<br><small>3 hooks × 3 CTAs × 3 scripts</small></div>
+        </div>
       </div>
     </div>
 
@@ -54,7 +81,7 @@
         <label class="f">Password</label><input type="password" name="password" required minlength="8" autocomplete="current-password">
         <p id="authErr" class="small" style="color:var(--bad)"></p>
         <button class="btn primary" style="width:100%" id="authBtn">Sign in</button>
-        <p class="small muted auth-foot">🎬 Footage in · ads out</p>
+        <p class="small muted auth-foot">🎬 Footage in · ads out · COD ready for Zambia &amp; Zimbabwe</p>
       </form>
     </div>
   </section>
