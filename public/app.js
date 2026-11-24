@@ -184,122 +184,182 @@ async function loadProduct(id) {
   for (const k in state.sel) for (const x of state.sel[k]) if (!ids.has(x)) state.sel[k].delete(x);
 }
 
-const TABS = [['overview', 'Overview'], ['footage', 'Footage'], ['scripts', 'Scripts'], ['creatives', 'Creatives'], ['inspiration', 'Inspiration']];
+const TABS = [['overview', '✦ Overview'], ['footage', '🎞 Footage'], ['scripts', '📝 Scripts'], ['creatives', '🎬 Creatives'], ['inspiration', '✨ Inspiration']];
+
+// Where the product is on its way to a winning ad.
+function productSteps() {
+  const { clips, scripts, creatives } = state.data;
+  const ready = creatives.filter(c => c.render === 'ready');
+  const steps = [
+    { k: 'footage', ic: '🎞', t: 'Footage', d: clips.length ? `${clips.length} clips` : 'Drop your TikToks', done: clips.length > 0 },
+    { k: 'scripts', ic: '📝', t: 'Scripts', d: scripts.length ? `${scripts.length} written` : 'Write with AI', done: scripts.length > 0 },
+    { k: 'creatives', ic: '🎙', t: 'Voice & music', d: creatives.some(c => c.voice_id) ? 'Voice-over on' : 'Choose a voice', done: creatives.some(c => c.voice_id) },
+    { k: 'creatives', ic: '🎬', t: 'Ads made', d: ready.length ? `${ready.length} ready` : 'Create ads', done: ready.length > 0 },
+    { k: 'creatives', ic: '🏆', t: 'Winner', d: creatives.some(c => c.status === 'winner') ? `${creatives.filter(c => c.status === 'winner').length} found` : 'Test & pick', done: creatives.some(c => c.status === 'winner') },
+  ];
+  const cur = steps.findIndex(s => !s.done);
+  return steps.map((s, i) => ({ ...s, cur: i === cur }));
+}
 
 async function renderProduct(id) {
   try { await Promise.all([loadProduct(id), loadMarkets()]); } catch (e) { fail(e); location.hash = 'products'; return; }
   const { product: p, clips, scripts, creatives, inspirations } = state.data;
   const pic = productPic({ ...p, cover_clip: clips[0]?.id });
   const counts = { footage: clips.length, scripts: scripts.length, creatives: creatives.length, inspiration: inspirations.length };
-  const link = (url, label) => (url ? `<a class="plink" href="${esc(url)}" target="_blank" rel="noopener">${label} ↗</a>` : '');
+  const n = k => clips.filter(c => c.kind === k).length;
+  const winners = creatives.filter(c => c.status === 'winner').length;
+  const link = (url, ic, label) => (url ? `<a class="glass-chip" href="${esc(url)}" target="_blank" rel="noopener">${ic} ${label} <i>↗</i></a>` : '');
+  const steps = productSteps();
   const v = $('#view');
   v.innerHTML = `
     <a class="back" href="#products">← All products</a>
-    <div class="phero card">
-      <label class="phero-img" title="Change the picture">${pic ? `<img src="${pic}" alt="">` : '<span>📷<br><small>Add a picture</small></span>'}
-        <input type="file" accept="image/*" class="hidden" id="pImage"></label>
-      <div class="phero-main">
-        <div class="row" style="gap:6px">
-          <select id="pStatus" class="pst-sel st-${p.status}">${Object.entries(P_STATUS).map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          ${p.markets.map(m => `<span class="mkf">${flag(m.code)}${esc(MARKETS[m.code]?.name || m.code)}</span>`).join('')}
+    <section class="hero2">
+      ${pic ? `<div class="hero2-bg" style="background-image:url('${pic}')"></div>` : ''}
+      <div class="hero2-top">
+        <label class="hero2-pic" title="Change the picture">${pic ? `<img src="${pic}" alt="">` : '<span>📷<br><small>Add a picture</small></span>'}
+          <span class="hero2-pic-edit">📷</span><input type="file" accept="image/*" class="hidden" id="pImage"></label>
+        <div class="hero2-main">
+          <div class="hero2-tags">
+            <select id="pStatus" class="glass-sel">${Object.entries(P_STATUS).map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            ${p.markets.map(m => `<span class="glass-chip flagc">${flag(m.code)}${esc(MARKETS[m.code]?.name || m.code)}</span>`).join('')}
+          </div>
+          <h1>${esc(p.name)}</h1>
+          <div class="hero2-links">
+            ${link(p.link_product, '🛒', 'Product page')}${link(p.link_alibaba, '🏭', 'Alibaba / 1688')}${link(p.link_amazon, '📦', 'Amazon')}
+            ${!p.link_product && !p.link_alibaba && !p.link_amazon ? '<button class="glass-chip" id="addLinks">＋ Add links</button>' : ''}
+          </div>
+          <div class="hero2-by">Added ${esc(p.created_at.slice(0, 10))}${state.data.author ? ` by ${esc(state.data.author)}` : ''}</div>
         </div>
-        <h1>${esc(p.name)}</h1>
-        <div class="phero-meta">
-          ${link(p.link_product, '🛒 Product page')}${link(p.link_alibaba, '🏭 Alibaba / 1688')}${link(p.link_amazon, '📦 Amazon')}
-          <span class="muted small">Added ${esc(p.created_at.slice(0, 10))}${state.data.author ? ` by ${esc(state.data.author)}` : ''}</span>
+        <div class="hero2-actions">
+          <button class="btn primary big" id="pCreate">🎬 Create ads</button>
+          <div class="row" style="gap:6px;justify-content:flex-end">
+            <button class="glass-btn" id="pEdit">✏️ Edit</button>
+            ${ME.user.role === 'admin' ? '<button class="glass-btn danger" id="delProduct" title="Delete product">🗑</button>' : ''}
+          </div>
         </div>
       </div>
-      <div class="phero-actions">
-        <button class="btn" id="pEdit">✏️ Edit</button>
-        ${ME.user.role === 'admin' ? '<button class="btn sm ghost danger" id="delProduct">🗑 Delete</button>' : ''}
+      <div class="hero2-stats">
+        <div><b>${n('hook')}</b><span><i class="dot-h"></i>Hooks</span></div>
+        <div><b>${n('body')}</b><span><i class="dot-b"></i>Bodies</span></div>
+        <div><b>${n('cta')}</b><span><i class="dot-c"></i>CTAs</span></div>
+        <div><b>${scripts.length}</b><span>📝 Scripts</span></div>
+        <div><b>${creatives.length}</b><span>🎬 Ads</span></div>
+        <div class="${winners ? 'win' : ''}"><b>${winners}</b><span>🏆 Winners</span></div>
       </div>
+    </section>
+
+    <div class="journey">
+      ${steps.map((s, i) => `<a class="jstep ${s.done ? 'done' : ''} ${s.cur ? 'cur' : ''}" href="#product/${id}/${s.k}">
+        <span class="jic">${s.done ? '✓' : s.ic}</span><div><b>${s.t}</b><small>${esc(s.d)}</small></div></a>${i < steps.length - 1 ? '<span class="jline"></span>' : ''}`).join('')}
     </div>
+
     <div class="tabs">${TABS.map(([k, l]) => `<a data-tab="${k}" class="${k === state.tab ? 'on' : ''}">${l}${counts[k] !== undefined ? ` <span class="cnt">${counts[k]}</span>` : ''}</a>`).join('')}</div>
     <div id="tab"></div>`;
   v.querySelectorAll('.tabs a').forEach(a => { a.onclick = () => { location.hash = `product/${id}/${a.dataset.tab}`; }; });
-  $('#pStatus').onchange = e => api(`/api/products/${id}`, { method: 'PATCH', body: { status: e.target.value } }).then(() => { e.target.className = `pst-sel st-${e.target.value}`; toast('Status saved'); }, fail);
+  $('#pStatus').onchange = e => api(`/api/products/${id}`, { method: 'PATCH', body: { status: e.target.value } }).then(() => toast('Status saved'), fail);
   $('#pImage').onchange = e => {
     const f = e.target.files[0];
     if (!f) return;
     const fd = new FormData(); fd.append('file', f);
-    fetch(`/api/products/${id}/image`, { method: 'POST', body: fd }).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error); renderProduct(id); }), fail).catch(fail);
+    fetch(`/api/products/${id}/image`, { method: 'POST', body: fd }).then(r => r.json().then(j => { if (!r.ok) throw new Error(j.error); renderProduct(id); refreshSide(); }), fail).catch(fail);
   };
   $('#pEdit').onclick = () => editProduct(p);
+  $('#addLinks')?.addEventListener('click', () => editProduct(p));
+  $('#pCreate').onclick = () => {
+    // Tick every clip and open the studio.
+    state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
+    clips.forEach(c => state.sel[c.kind].add(c.id));
+    if (!clips.length) { location.hash = `product/${id}/footage`; return toast('Add footage first: drop your TikToks in Auto-split'); }
+    if (state.tab !== 'footage') { location.hash = `product/${id}/footage`; setTimeout(openStudio, 400); } else openStudio();
+  };
   const del = $('#delProduct');
   if (del) del.onclick = async () => {
     if (!confirm(`Delete "${p.name}" with all its footage, scripts, videos and inspiration? This cannot be undone.`)) return;
-    try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; } catch (e) { fail(e); }
+    try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; refreshSide(); } catch (e) { fail(e); }
   };
   ({ overview: renderOverview, footage: renderFootage, scripts: renderScripts, creatives: renderCreatives, inspiration: renderInspiration }[state.tab] || renderOverview)();
 }
 
-// Overview: the product's brief, markets, numbers, latest ads and inspiration.
+// Overview: latest ads, brief, what the AI knows, markets, inspiration.
 function renderOverview() {
-  const { product: p, clips, scripts, creatives, inspirations } = state.data;
-  const n = k => clips.filter(c => c.kind === k).length;
-  const byLang = Object.entries(scripts.reduce((a, s) => ({ ...a, [s.language]: (a[s.language] || 0) + 1 }), {}));
+  const { product: p, scripts, creatives, inspirations } = state.data;
   const ready = creatives.filter(c => c.render === 'ready');
-  const field = (label, html) => `<div class="bf"><div class="bf-l">${label}</div><div class="bf-v">${html}</div></div>`;
-  const url = u => (u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/, '').slice(0, 48))} ↗</a>` : '<span class="muted">Not added</span>');
+  const making = creatives.filter(c => c.render === 'queued' || c.render === 'rendering').length;
+  const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+  const tile = (u, ic, title, color) => (u
+    ? `<a class="ltile" href="${esc(u)}" target="_blank" rel="noopener"><span class="lt-ic" style="background:${color}">${ic}</span>
+        <div><b>${title}</b><small>${esc(host(u))}</small></div><i>↗</i></a>`
+    : `<button class="ltile empty" data-edit><span class="lt-ic">${ic}</span><div><b>${title}</b><small>＋ Add the link</small></div></button>`);
+  const total = p.markets.length;
   $('#tab').innerHTML = `
-    <div class="ov">
-      <div class="ov-main">
-        <div class="card">
-          <div class="row spread"><h2 style="margin:0">Brief</h2><button class="btn sm" id="ovEdit">✏️ Edit</button></div>
-          <p class="muted small" style="margin:2px 0 12px">Everything the team needs for this product's ads.</p>
-          <div class="bgrid">
-            ${field('Product page', url(p.link_product))}
-            ${field('Alibaba / 1688', url(p.link_alibaba))}
-            ${field('Amazon', url(p.link_amazon))}
-            ${field('CTA banner on videos', p.banner ? esc(p.banner) : '<span class="muted">"Pay on delivery" (default)</span>')}
+    <div class="ov2">
+      <section class="card ov2-ads">
+        <div class="sec-h"><div><h2>🎬 Latest ads</h2><small>${ready.length} ready${making ? ` · <b class="making">${making} being made</b>` : ''}</small></div>
+          <a class="sec-link" href="#product/${p.id}/creatives">See all ${creatives.length} →</a></div>
+        <div class="reel">
+          ${ready.slice(0, 8).map(c => `<a class="reel-card" href="#product/${p.id}/creatives">
+            <video muted loop playsinline preload="none" poster="/media/thumb/creative/${c.id}" data-src="/media/creative/${c.id}"></video>
+            <span class="reel-st ${c.status}">${STATUS_LABEL[c.status]}</span><span class="reel-play">▶</span>
+            <span class="reel-name">${esc(c.style === 'bss' ? 'BSS montage' : 'Classic')} · ${fmtDur(c.duration)}</span></a>`).join('')}
+          <button class="reel-card add" id="ovCreate"><span>＋</span><b>Create ads</b><small>from the footage</small></button>
+        </div>
+      </section>
+
+      <div class="ov2-grid">
+        <section class="card">
+          <div class="sec-h"><div><h2>🔗 Links</h2><small>Store, supplier and research</small></div><button class="btn sm" data-edit>✏️ Edit</button></div>
+          <div class="ltiles">
+            ${tile(p.link_product, '🛒', 'Product page', 'linear-gradient(135deg,#ff4d2e,#ff9d00)')}
+            ${tile(p.link_alibaba, '🏭', 'Alibaba / 1688', 'linear-gradient(135deg,#ff7a00,#ffb020)')}
+            ${tile(p.link_amazon, '📦', 'Amazon', 'linear-gradient(135deg,#232f3e,#4a5a70)')}
           </div>
-          ${field('Notes for the AI (benefits, buyers, price, offer)', `<textarea id="ovNotes" placeholder="e.g. Crystal bracelet, gold finish, gift for her, 680 ZMW, pay on delivery">${esc(p.notes)}</textarea>
-            <div class="row" style="margin-top:6px"><button class="btn sm" id="ovSave">Save notes</button>${p.music_style ? `<span class="small muted">🎵 Music style: ${esc(p.music_style)}</span>` : ''}</div>`)}
-        </div>
+        </section>
 
-        <div class="card">
-          <div class="row spread"><h2 style="margin:0">Latest ads</h2><a class="small" href="#product/${p.id}/creatives">All ${creatives.length} →</a></div>
-          ${ready.length ? `<div class="mini-grid">${ready.slice(0, 6).map(c => `<a href="#product/${p.id}/creatives" class="mini"><img src="/media/thumb/creative/${c.id}" alt="" loading="lazy">
-            <span class="mini-tag ${c.status}">${STATUS_LABEL[c.status]}</span></a>`).join('')}</div>`
-            : `<div class="st-empty" style="margin-top:10px">No ad yet. Go to <a href="#product/${p.id}/footage">Footage</a>, tick clips and click <b>🎬 Create ads</b>.</div>`}
-        </div>
-
-        <div class="card">
-          <div class="row spread"><h2 style="margin:0">Inspiration</h2><a class="small" href="#product/${p.id}/inspiration">${inspirations.length ? `All ${inspirations.length} →` : '+ Add'}</a></div>
-          ${inspirations.length ? `<div class="mini-grid">${inspirations.slice(0, 6).map(i => `<a href="#product/${p.id}/inspiration" class="mini">
-            <img src="${i.kind === 'image' ? `/media/inspiration/${i.id}` : `/media/thumb/insp/${i.id}`}" alt="" loading="lazy">${i.kind === 'video' ? '<span class="mini-play">▶</span>' : ''}</a>`).join('')}</div>`
-            : '<div class="st-empty" style="margin-top:10px">Ads or screenshots you like for this product: the team copies their style.</div>'}
-        </div>
+        <section class="card mk-card">
+          <div class="sec-h"><div><h2>🌍 Markets</h2><small>${total ? `Selling in ${total} countr${total > 1 ? 'ies' : 'y'}` : 'Where do you sell it?'}</small></div><button class="btn sm" data-edit>✏️</button></div>
+          ${total ? p.markets.map(m => `<div class="mk2">${flag(m.code, 'lg')}<div><b>${esc(MARKETS[m.code]?.name || m.code)}</b><small>Cash on delivery</small></div>
+            <div class="mk2-price">${m.price ? `${esc(m.price)}<small>${esc(MARKETS[m.code]?.currency || '')}</small>` : '<span class="muted small">no price</span>'}</div></div>`).join('')
+            : '<button class="ltile empty" data-edit style="width:100%"><span class="lt-ic">🌍</span><div><b>Add markets</b><small>Countries and prices</small></div></button>'}
+        </section>
       </div>
 
-      <div class="ov-side">
-        <div class="card">
-          <div class="row spread"><h2 style="margin:0">Markets</h2><button class="btn sm" id="ovMk">✏️</button></div>
-          ${p.markets.length ? p.markets.map(m => `<div class="mrow">${flag(m.code, 'lg')}<b>${esc(MARKETS[m.code]?.name || m.code)}</b>
-            <span class="mprice">${m.price ? `${esc(m.price)} <small>${esc(MARKETS[m.code]?.currency || '')}</small>` : '<span class="muted small">no price</span>'}</span></div>`).join('')
-            : '<div class="st-empty" style="margin-top:10px">Where do you sell it? Click ✏️</div>'}
-        </div>
-        <div class="card">
-          <h2>Numbers</h2>
-          <div class="nums">
-            <div><b>${n('hook')}</b><span class="chip hook">hooks</span></div><div><b>${n('body')}</b><span class="chip body">bodies</span></div><div><b>${n('cta')}</b><span class="chip cta">CTAs</span></div>
-            <div><b>${scripts.length}</b><span class="chip">scripts</span></div><div><b>${creatives.length}</b><span class="chip">ads</span></div><div><b>${creatives.filter(c => c.status === 'winner').length}</b><span class="chip win">winners</span></div>
+      <section class="card ai-card">
+        <div class="sec-h"><div><h2>🤖 What the AI knows</h2><small>Used for every script: benefits, buyers, price, offer, tone</small></div>
+          <span class="ai-count" id="ovCount">${p.notes.length} chars</span></div>
+        <textarea id="ovNotes" placeholder="e.g. Crystal bracelet, gold finish, a gift for her. 780 ZMW, buy 2 get the 3rd free. Pay on delivery, 24-72 h.">${esc(p.notes)}</textarea>
+        <div class="ai-foot">
+          <div class="ai-meta">
+            <span class="ai-pill">📣 CTA: ${esc(p.banner || 'Pay on delivery')}</span>
+            ${p.music_style ? `<span class="ai-pill">🎵 ${esc(p.music_style.slice(0, 60))}${p.music_style.length > 60 ? '…' : ''}</span>` : ''}
+            <span class="ai-pill">📝 ${scripts.length} script${scripts.length === 1 ? '' : 's'}</span>
           </div>
-          ${byLang.length ? `<div class="small muted" style="margin-top:10px">Scripts: ${byLang.map(([l, k]) => `${k} ${ME.languages[l] || l}`).join(' · ')}</div>` : ''}
+          <button class="btn primary" id="ovSave">Save</button>
         </div>
-        <div class="card next">
-          <h2>Next step</h2>
-          ${!clips.length ? `<p>Add footage: drop your TikToks in <a href="#product/${p.id}/footage">Auto-split</a>.</p>`
-            : !scripts.length ? `<p>Write scripts with AI in <a href="#product/${p.id}/scripts">Scripts</a> (style BSS).</p>`
-            : !creatives.length ? `<p>Tick clips in <a href="#product/${p.id}/footage">Footage</a> and click <b>🎬 Create ads</b>.</p>`
-            : `<p>Mark ads as <b>Testing</b>, then <b>Winner</b> or <b>Loser</b> in <a href="#product/${p.id}/creatives">Creatives</a>.</p>`}
+      </section>
+
+      <section class="card">
+        <div class="sec-h"><div><h2>✨ Inspiration</h2><small>Ads and screenshots whose style the team copies</small></div>
+          <a class="sec-link" href="#product/${p.id}/inspiration">${inspirations.length ? `All ${inspirations.length} →` : 'Open →'}</a></div>
+        <div class="insp-row">
+          ${inspirations.slice(0, 6).map(i => `<a class="insp-mini" href="#product/${p.id}/inspiration">
+            <img src="${i.kind === 'image' ? `/media/inspiration/${i.id}` : `/media/thumb/insp/${i.id}`}" alt="" loading="lazy">${i.kind === 'video' ? '<span class="reel-play">▶</span>' : ''}</a>`).join('')}
+          <a class="insp-mini add" href="#product/${p.id}/inspiration"><span>＋</span><small>Add</small></a>
         </div>
-      </div>
+      </section>
     </div>`;
-  $('#ovEdit').onclick = () => editProduct(p);
-  $('#ovMk').onclick = () => editProduct(p);
-  $('#ovSave').onclick = () => api(`/api/products/${p.id}`, { method: 'PATCH', body: { notes: $('#ovNotes').value } }).then(() => toast('Notes saved'), fail);
+  $('#tab').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editProduct(p));
+  $('#ovCreate').onclick = () => $('#pCreate').click();
+  const notes = $('#ovNotes');
+  notes.oninput = () => { $('#ovCount').textContent = `${notes.value.length} chars`; };
+  $('#ovSave').onclick = () => api(`/api/products/${p.id}`, { method: 'PATCH', body: { notes: notes.value } }).then(() => toast('Saved'), fail);
+  // Ads play when the mouse is on them.
+  $('#tab').querySelectorAll('.reel-card video').forEach(vd => {
+    const card = vd.closest('.reel-card');
+    card.onmouseenter = () => { if (!vd.src) vd.src = vd.dataset.src; vd.play().catch(() => {}); };
+    card.onmouseleave = () => vd.pause();
+  });
 }
+
 
 // Edit product: a live preview on the left (picture, name, status, markets, CTA banner), the form on the right.
 const REGIONS = [
