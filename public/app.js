@@ -168,7 +168,7 @@ async function renderProducts() {
     e.preventDefault();
     try {
       const { id } = await api('/api/products', { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
-      location.hash = `product/${id}`;
+      location.hash = `product/${id}/strategy`; // new product: start with its information and analysis
     } catch (err) { fail(err); }
   };
   const ps = $('#pSearch');
@@ -188,7 +188,7 @@ async function loadProduct(id) {
 const sourceIcon = u => (/amazon./i.test(u || '') ? '📦' : '🏭');
 const sourceName = u => (/amazon./i.test(u || '') ? 'Amazon' : /1688.com/i.test(u || '') ? '1688' : /alibaba./i.test(u || '') ? 'Alibaba' : 'Alibaba / 1688 / Amazon');
 
-const TABS = [['overview', '✦ Overview'], ['footage', '🎞 Footage'], ['scripts', '📝 Scripts'], ['creatives', '🎬 Creatives'], ['inspiration', '✨ Inspiration']];
+const TABS = [['overview', '✦ Overview'], ['strategy', '🧠 Strategy'], ['footage', '🎞 Footage'], ['scripts', '📝 Scripts'], ['creatives', '🎬 Creatives'], ['inspiration', '✨ Inspiration']];
 
 // Where the product is on its way to a winning ad.
 function productSteps() {
@@ -281,7 +281,7 @@ async function renderProduct(id) {
     if (!confirm(`Delete "${p.name}" with all its footage, scripts, videos and inspiration? This cannot be undone.`)) return;
     try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; refreshSide(); } catch (e) { fail(e); }
   };
-  ({ overview: renderOverview, footage: renderFootage, scripts: renderScripts, creatives: renderCreatives, inspiration: renderInspiration }[state.tab] || renderOverview)();
+  ({ overview: renderOverview, strategy: renderStrategy, footage: renderFootage, scripts: renderScripts, creatives: renderCreatives, inspiration: renderInspiration }[state.tab] || renderOverview)();
 }
 
 // Overview: latest ads, brief, what the AI knows, markets, inspiration.
@@ -383,6 +383,355 @@ function renderOverview() {
   });
 }
 
+
+// ---------- Strategy (Module 1): Product → Analysis → Angles → Continue ----------
+const STRAT_STEPS = [['product', 'Product', '📦'], ['analysis', 'Analysis', '🧠'], ['angles', 'Marketing angles', '🎯'], ['continue', 'Continue', '🚀']];
+
+async function loadStrategy() {
+  state.strat = await api(`/api/products/${state.product}/strategy`);
+  return state.strat;
+}
+const jobOf = (kind, target) => state.strat.jobs.find(j => j.kind === kind && j.status === 'running' && (target === undefined || j.target_id === target));
+const lastJob = kind => state.strat.jobs.find(j => j.kind === kind);
+
+async function renderStrategy() {
+  try { await loadStrategy(); } catch (e) { return fail(e); }
+  const s = state.strat;
+  if (!state.stratStep || state.stratFor !== state.product) {
+    state.stratFor = state.product;
+    state.stratStep = !s.analysis && !jobOf('analysis') ? 'product' : !s.angles.length && !jobOf('angles') && !jobOf('analysis') ? 'analysis' : 'angles';
+    state.angleDraft = null;
+  }
+  if (!state.angleDraft) state.angleDraft = new Set(s.angles.filter(a => a.selected).map(a => a.id));
+  drawStrategy();
+  // While the AI works, check every 2 s.
+  clearInterval(state.poll);
+  if (s.jobs.some(j => j.status === 'running')) {
+    state.poll = setInterval(async () => {
+      if (state.tab !== 'strategy' || !location.hash.startsWith(`#product/${state.product}`)) return clearInterval(state.poll);
+      const before = JSON.stringify(state.strat.jobs.map(j => [j.id, j.status]));
+      await loadStrategy().catch(() => {});
+      if (JSON.stringify(state.strat.jobs.map(j => [j.id, j.status])) !== before) {
+        // A finished analysis moves on to the angles step.
+        if (state.stratStep === 'analysis' && state.strat.angles.length && !state.strat.jobs.some(j => j.status === 'running')) state.stratStep = 'angles';
+        state.angleDraft = new Set([...state.angleDraft].filter(id => state.strat.angles.some(a => a.id === id)));
+        for (const a of state.strat.angles) if (a.selected) state.angleDraft.add(a.id);
+        drawStrategy();
+        if (!state.strat.jobs.some(j => j.status === 'running')) { clearInterval(state.poll); renderStrategy(); }
+      } else drawStrategy(true);
+    }, 2000);
+  }
+}
+
+function drawStrategy(onlyTimers = false) {
+  if (onlyTimers) { document.querySelectorAll('[data-since]').forEach(el => { el.textContent = elapsed(el.dataset.since); }); return; }
+  const s = state.strat, p = state.data.product;
+  const done = { product: Boolean(p.description || s.images.length || p.image), analysis: Boolean(s.analysis), angles: s.angles.length > 0, continue: s.angles.some(a => a.selected) };
+  const t = $('#tab');
+  const keepScroll = window.scrollY;
+  t.innerHTML = `
+    ${s.mock ? '<div class="mock-bar">🧪 Test mode: the AI answers are examples (ACC_AI_MOCK=1).</div>' : ''}
+    <div class="sstepper">
+      ${STRAT_STEPS.map(([k, l, ic], i) => `<button class="sstep ${state.stratStep === k ? 'on' : ''} ${done[k] ? 'done' : ''}" data-step="${k}">
+        <span class="sstep-n">${done[k] && state.stratStep !== k ? '✓' : i + 1}</span><span class="sstep-t"><small>Step ${i + 1}</small>${ic} ${l}</span></button>
+        ${i < STRAT_STEPS.length - 1 ? '<span class="sstep-line"></span>' : ''}`).join('')}
+    </div>
+    <div id="stratBody"></div>`;
+  t.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { state.stratStep = b.dataset.step; drawStrategy(); });
+  ({ product: drawProductStep, analysis: drawAnalysisStep, angles: drawAnglesStep, continue: drawContinueStep })[state.stratStep]();
+  window.scrollTo(0, keepScroll);
+}
+
+const elapsed = since => { const s = Math.max(0, Math.round((Date.now() - new Date(since.replace(' ', 'T') + 'Z')) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const working = (title, sub, job) => `<div class="ai-working"><div class="ai-orb"><span></span><span></span><span></span></div>
+  <div><b>${title}</b><small>${sub}</small></div><span class="ai-time" data-since="${esc(job.created_at)}">${elapsed(job.created_at)}</span></div>`;
+const failedBox = (msg, retryId) => `<div class="ai-failed"><b>⚠ ${esc(msg)}</b><button class="btn sm" id="${retryId}">↻ Try again</button></div>`;
+
+// Step 1: product information (import from a link, or by hand) and pictures.
+function drawProductStep() {
+  const p = state.data.product, s = state.strat;
+  const imp = state.imported;
+  $('#stratBody').innerHTML = `
+    <div class="sgrid">
+      <section class="card simport">
+        <div class="sec-h"><div><h2>🔗 Import from the product page</h2><small>We read the page; you check and correct everything before saving.</small></div></div>
+        <form class="import-row" id="impForm"><input type="url" name="url" placeholder="https://savaro.storeep.com/products/… or Alibaba / Amazon link" value="${esc(imp?.url || p.link_product || '')}" required>
+          <button class="btn primary" id="impBtn">Import</button></form>
+        ${imp ? `<div class="imp-res">
+          ${imp.warning ? `<div class="imp-warn">⚠ ${esc(imp.warning)}</div>` : ''}
+          <div class="imp-fields">
+            <div><span>Name</span><b>${esc(imp.name || '–')}</b></div>
+            <div><span>Price</span><b>${esc(imp.price || '–')}</b></div>
+            ${imp.offer ? `<div><span>Offer</span><b>${esc(imp.offer)}</b></div>` : ''}
+            <div class="full"><span>Description</span><p>${esc((imp.description || '–').slice(0, 600))}${(imp.description || '').length > 600 ? '…' : ''}</p></div>
+          </div>
+          ${imp.images.length ? `<div class="imp-pics-h">Pictures found: tick the ones to keep</div><div class="imp-pics">${imp.images.map((u, i) => `
+            <label class="imp-pic ${state.impPick?.has(i) ? 'on' : ''}"><input type="checkbox" data-pick="${i}" ${state.impPick?.has(i) ? 'checked' : ''}><img src="${esc(u)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.closest('label').remove()"></label>`).join('')}</div>` : ''}
+          <div class="row" style="margin-top:12px"><button class="btn primary" id="impUse">✓ Use this information</button><button class="btn" id="impCancel">Cancel</button></div>
+        </div>` : ''}
+      </section>
+
+      <form class="card sform" id="prodForm">
+        <div class="sec-h"><div><h2>📦 Product information</h2><small>What the AI will analyse. Only facts: it does not invent anything.</small></div></div>
+        <div class="f2">
+          <label class="fl full"><span>Product name *</span><input name="name" value="${esc(p.name)}" required></label>
+          <label class="fl full"><span>Product page URL</span><input name="link_product" value="${esc(p.link_product)}" placeholder="https://…"></label>
+          <label class="fl full"><span>Description</span><textarea name="description" rows="7" placeholder="What it is, features, specs, what is in the box…">${esc(p.description)}</textarea></label>
+          <label class="fl"><span>Selling price <i>(optional)</i></span><input name="price" value="${esc(p.price)}" placeholder="780 ZMW"></label>
+          <label class="fl"><span>Promotional offer <i>(optional)</i></span><input name="offer" value="${esc(p.offer)}" placeholder="Buy 2, get the 3rd free"></label>
+          <label class="fl"><span>Target country</span><select name="country"><option value="">Choose…</option>${Object.entries(MARKETS).map(([c, m]) => `<option value="${c}" ${p.country === c ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+          <label class="fl"><span>Target language</span><select name="language">${Object.entries(ME.languages).map(([k, l]) => `<option value="${k}" ${p.language === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        </div>
+        <div class="pics-h"><b>🖼 Product pictures</b><small>${s.images.length} · the AI looks at up to 4</small></div>
+        <div class="pics">
+          ${s.images.map(im => `<div class="pic ${p.image === im.file ? 'main' : ''}"><img src="/media/product-image/${im.id}" alt="" loading="lazy">
+            ${p.image === im.file ? '<span class="pic-main">★ Main</span>' : `<button type="button" class="pic-btn" data-main="${im.id}" title="Make it the main picture">★</button>`}
+            <button type="button" class="pic-btn del" data-delimg="${im.id}" title="Remove">✕</button></div>`).join('')}
+          <label class="pic add"><input type="file" accept="image/*" multiple class="hidden" id="picIn"><span>＋</span><small>Add pictures</small></label>
+        </div>
+        <div class="sform-foot">
+          <button type="submit" class="btn" name="save">Save</button>
+          <button type="submit" class="btn primary big" name="go">Save &amp; analyse with AI →</button>
+        </div>
+      </form>
+    </div>`;
+
+  $('#impForm').onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('#impBtn');
+    btn.disabled = true; btn.innerHTML = '<span class="spin sm"></span> Reading the page…';
+    try {
+      state.imported = await api('/api/import-url', { method: 'POST', body: { url: e.target.url.value } });
+      state.impPick = new Set(state.imported.images.slice(0, 4).map((_, i) => i));
+    } catch (err) { fail(err); }
+    drawProductStep();
+  };
+  document.querySelectorAll('[data-pick]').forEach(cb => cb.onchange = () => { cb.checked ? state.impPick.add(Number(cb.dataset.pick)) : state.impPick.delete(Number(cb.dataset.pick)); cb.closest('label').classList.toggle('on', cb.checked); });
+  $('#impCancel')?.addEventListener('click', () => { state.imported = null; drawProductStep(); });
+  $('#impUse')?.addEventListener('click', async () => {
+    const f = $('#prodForm');
+    if (imp.name) f.name.value = imp.name;
+    if (imp.description) f.description.value = imp.description;
+    if (imp.price) f.price.value = imp.price;
+    if (imp.offer) f.offer.value = imp.offer;
+    f.link_product.value = imp.url;
+    const urls = [...(state.impPick || [])].map(i => imp.images[i]);
+    const btn = $('#impUse');
+    btn.disabled = true; btn.textContent = urls.length ? `Saving ${urls.length} pictures…` : 'Saving…';
+    try {
+      await saveProductForm();
+      if (urls.length) {
+        const r = await api(`/api/products/${state.product}/images/from-urls`, { method: 'POST', body: { urls } });
+        if (r.failed.length) toast(`${r.added} pictures saved, ${r.failed.length} could not be downloaded`, true);
+      }
+      state.imported = null;
+      toast('Imported: check the information');
+      await reloadProductData();
+    } catch (err) { fail(err); btn.disabled = false; btn.textContent = '✓ Use this information'; }
+  });
+  $('#picIn').onchange = async e => {
+    const fd = new FormData();
+    for (const f of e.target.files) fd.append('files', f);
+    const r = await fetch(`/api/products/${state.product}/images`, { method: 'POST', body: fd });
+    if (!r.ok) return fail(new Error((await r.json().catch(() => ({}))).error || 'Upload failed'));
+    await reloadProductData();
+  };
+  document.querySelectorAll('[data-main]').forEach(b => b.onclick = () => api(`/api/product-images/${b.dataset.main}/main`, { method: 'POST' }).then(reloadProductData, fail));
+  document.querySelectorAll('[data-delimg]').forEach(b => b.onclick = () => { if (confirm('Remove this picture?')) api(`/api/product-images/${b.dataset.delimg}`, { method: 'DELETE' }).then(reloadProductData, fail); });
+  $('#prodForm').onsubmit = async e => {
+    e.preventDefault();
+    const go = e.submitter?.name === 'go';
+    try {
+      await saveProductForm();
+      if (go) {
+        await api(`/api/products/${state.product}/analyze`, { method: 'POST', body: {} });
+        state.stratStep = 'analysis';
+      } else toast('Saved');
+      await reloadProductData();
+    } catch (err) { fail(err); }
+  };
+}
+
+async function saveProductForm() {
+  const f = Object.fromEntries(new FormData($('#prodForm')));
+  await api(`/api/products/${state.product}`, { method: 'PATCH', body: f });
+}
+// The header (picture, name) may have changed: draw the whole product page again (the step stays).
+async function reloadProductData() {
+  const y = window.scrollY;
+  await renderProduct(state.product);
+  window.scrollTo(0, y);
+  refreshSide();
+}
+
+// Step 2: the analysis.
+function drawAnalysisStep() {
+  const s = state.strat, a = s.analysis?.data;
+  const job = jobOf('analysis'), fail2 = !job && s.lastAnalysis?.status === 'failed' ? s.lastAnalysis : null;
+  const list = (title, ic, items, cls = '') => items?.length ? `<div class="an-box ${cls}"><h4>${ic} ${title}</h4><ul>${items.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '';
+  $('#stratBody').innerHTML = `
+    ${job ? working('Analysing the product…', 'Reading the description and pictures, thinking about the market. Usually 30-90 seconds.', job) : ''}
+    ${jobOf('angles') ? working('Writing the marketing angles…', 'Analysis done: 8-12 distinct angles are on their way.', jobOf('angles')) : ''}
+    ${fail2 ? failedBox(`The analysis failed: ${fail2.error}`, 'anRetry') : ''}
+    ${!a && !job && !fail2 ? `<div class="card s-empty"><div class="s-empty-ic">🧠</div><h2>No analysis yet</h2>
+      <p class="muted">The AI reads the product information and pictures and finds the audiences, pain points, objections and selling points for the target market.</p>
+      <button class="btn primary big" id="anStart">Analyse with AI</button></div>` : ''}
+    ${a ? `
+      <div class="card an-head">
+        <div><span class="chip">${esc(a.category)}</span><h2>${esc(state.data.product.name)}</h2><p>${esc(a.summary)}</p></div>
+        <div class="row"><button class="btn" id="anRedo" ${job ? 'disabled' : ''}>↻ Analyse again</button><button class="btn primary" id="anNext">Marketing angles →</button></div>
+      </div>
+      <div class="an-grid">
+        ${list('Main features', '⚙️', a.features)}
+        ${list('Customer benefits', '💎', a.benefits)}
+        ${list('Problems solved', '🧩', a.problems_solved)}
+        <div class="an-box"><h4>👥 Target audiences</h4>${a.audiences.map(x => `<div class="aud"><b>${esc(x.name)}</b><small>${esc(x.description)}</small></div>`).join('')}</div>
+        ${list('Pain points', '😣', a.pain_points)}
+        ${list('Purchase motivations', '🛒', a.motivations)}
+        <div class="an-box wide"><h4>🤔 Objections and answers</h4>${a.objections.map(x => `<div class="obj"><b>“${esc(x.objection)}”</b><span>→ ${esc(x.answer)}</span></div>`).join('')}</div>
+        ${list('Unique selling points', '⭐', a.usps)}
+        ${list('Emotional triggers', '❤️', a.emotional_triggers)}
+        <div class="an-box wide market"><h4>🌍 ${esc(MARKETS[state.data.product.country]?.name || 'Market')} notes</h4><p>${esc(a.market_notes)}</p></div>
+        ${list('To check or add (not invented)', '⚠️', a.missing_info, 'warn wide')}
+      </div>` : ''}`;
+  $('#anStart')?.addEventListener('click', startAnalysisNow);
+  $('#anRetry')?.addEventListener('click', startAnalysisNow);
+  $('#anRedo')?.addEventListener('click', () => { if (confirm('Analyse again? Angles you did not select or edit will be replaced.')) startAnalysisNow(); });
+  $('#anNext')?.addEventListener('click', () => { state.stratStep = 'angles'; drawStrategy(); });
+}
+async function startAnalysisNow() {
+  try { await api(`/api/products/${state.product}/analyze`, { method: 'POST', body: {} }); state.stratStep = 'analysis'; renderStrategy(); } catch (e) { fail(e); }
+}
+
+// Step 3: marketing angles as selectable cards.
+function drawAnglesStep() {
+  const s = state.strat, sel = state.angleDraft;
+  const allJob = jobOf('angles') || jobOf('analysis');
+  const lastAll = lastJob('angles');
+  const saved = new Set(s.angles.filter(a => a.selected).map(a => a.id));
+  const dirty = sel.size !== saved.size || [...sel].some(id => !saved.has(id));
+  $('#stratBody').innerHTML = `
+    ${allJob ? working(jobOf('analysis') ? 'Analysing the product…' : 'Writing the marketing angles…', 'Selected and edited angles are kept.', allJob) : ''}
+    ${!allJob && lastAll?.status === 'failed' ? failedBox(`Angles failed: ${lastAll.error}`, 'agRetry') : ''}
+    ${!s.analysis && !allJob ? `<div class="card s-empty"><div class="s-empty-ic">🎯</div><h2>Analyse the product first</h2><button class="btn primary big" id="agToAn">Go to analysis</button></div>` : `
+    <div class="ag-tools">
+      <div><h2>🎯 Marketing angles <small>${s.angles.length}</small></h2><small class="muted">Click a card to select it. Each angle = a different selling message.</small></div>
+      <div class="row">
+        <button class="btn" id="agCustom">＋ Custom angle</button>
+        <button class="btn" id="agAll" ${allJob ? 'disabled' : ''}>↻ Regenerate all</button>
+      </div>
+    </div>
+    <div class="angles">
+      ${s.angles.map(a => {
+        const busy = jobOf('angle', a.id);
+        return `<article class="angle ${sel.has(a.id) ? 'on' : ''} ${busy ? 'busy' : ''}" data-angle="${a.id}">
+          <div class="ang-top"><span class="ang-check">${sel.has(a.id) ? '✓' : ''}</span>
+            <h3>${esc(a.name)}</h3>${a.custom ? '<span class="chip">✏️ edited</span>' : ''}</div>
+          ${a.emotion ? `<span class="ang-emo">❤ ${esc(a.emotion)}</span>` : ''}
+          <p class="ang-desc">${esc(a.description)}</p>
+          <div class="ang-msg">“${esc(a.message)}”</div>
+          <div class="ang-meta"><div><span>👥 Audience</span>${esc(a.audience)}</div><div><span>😣 Pain point</span>${esc(a.pain_point)}</div></div>
+          <div class="ang-hooks"><span>🎣 Hooks</span>${a.hooks.map((h, i) => `<p><b>${i + 1}</b>${esc(h)}</p>`).join('')}</div>
+          <div class="ang-types">${a.creative_types.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>
+          ${a.why ? `<details class="ang-why"><summary>Why it could work</summary><p>${esc(a.why)}</p></details>` : ''}
+          <div class="ang-actions">
+            <button class="btn sm" data-aedit="${a.id}">✏️ Edit</button>
+            <button class="btn sm" data-aregen="${a.id}" ${busy || allJob ? 'disabled' : ''}>${busy ? '<span class="spin sm"></span> Rewriting…' : '↻ Regenerate'}</button>
+            <button class="btn sm ghost danger" data-adel="${a.id}">🗑</button>
+          </div>
+        </article>`;
+      }).join('')}
+      ${allJob && !s.angles.length ? Array(6).fill('<article class="angle skeleton"><i></i><i></i><i></i><i></i></article>').join('') : ''}
+    </div>
+    <div class="ag-bar ${sel.size ? 'show' : ''}">
+      <div><b>${sel.size}</b> angle${sel.size === 1 ? '' : 's'} selected${dirty ? ' · <span class="unsaved">not saved yet</span>' : ' · saved'}</div>
+      <button class="btn" id="agClear">Clear</button>
+      <button class="btn primary big" id="agSave">Save selection &amp; continue →</button>
+    </div>`}`;
+  $('#agToAn')?.addEventListener('click', () => { state.stratStep = 'analysis'; drawStrategy(); });
+  $('#agRetry')?.addEventListener('click', regenAll);
+  $('#agAll')?.addEventListener('click', () => { if (confirm('Regenerate all angles? Selected and edited angles are kept, the others are replaced.')) regenAll(); });
+  $('#agCustom')?.addEventListener('click', () => editAngle(null));
+  document.querySelectorAll('[data-angle]').forEach(card => card.onclick = e => {
+    if (e.target.closest('button, details, summary')) return;
+    const id = Number(card.dataset.angle);
+    sel.has(id) ? sel.delete(id) : sel.add(id);
+    drawAnglesStep();
+  });
+  document.querySelectorAll('[data-aedit]').forEach(b => b.onclick = () => editAngle(s.angles.find(a => a.id === Number(b.dataset.aedit))));
+  document.querySelectorAll('[data-aregen]').forEach(b => b.onclick = async () => {
+    try { await api(`/api/angles/${b.dataset.aregen}/regenerate`, { method: 'POST' }); renderStrategy(); } catch (e) { fail(e); }
+  });
+  document.querySelectorAll('[data-adel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this angle?')) return;
+    try { await api(`/api/angles/${b.dataset.adel}`, { method: 'DELETE' }); sel.delete(Number(b.dataset.adel)); renderStrategy(); } catch (e) { fail(e); }
+  });
+  $('#agClear')?.addEventListener('click', () => { sel.clear(); drawAnglesStep(); });
+  $('#agSave')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/products/${state.product}/angles/selection`, { method: 'POST', body: { ids: [...sel] } });
+      toast(`${sel.size} angle(s) saved`);
+      state.stratStep = 'continue';
+      renderStrategy();
+    } catch (e) { fail(e); }
+  });
+}
+async function regenAll() {
+  try { await api(`/api/products/${state.product}/angles/generate`, { method: 'POST' }); renderStrategy(); } catch (e) { fail(e); }
+}
+
+// Add or edit an angle (a window).
+function editAngle(a) {
+  const m = document.createElement('div');
+  m.className = 'studio-wrap center';
+  const v = a || { name: '', description: '', audience: '', pain_point: '', message: '', emotion: '', hooks: ['', '', ''], creative_types: [], why: '' };
+  const hooks = [...v.hooks, '', '', ''].slice(0, 3);
+  m.innerHTML = `<form class="modal-card ang-form">
+    <div class="row spread"><h2 style="margin:0">${a ? '✏️ Edit angle' : '＋ Custom angle'}</h2><button type="button" class="btn ghost" data-x>✕</button></div>
+    <div class="f2">
+      <label class="fl"><span>Angle name *</span><input name="name" value="${esc(v.name)}" required></label>
+      <label class="fl"><span>Emotional trigger</span><input name="emotion" value="${esc(v.emotion)}" placeholder="Love, pride, relief…"></label>
+      <label class="fl full"><span>Short description</span><textarea name="description" rows="2">${esc(v.description)}</textarea></label>
+      <label class="fl"><span>Target audience</span><input name="audience" value="${esc(v.audience)}"></label>
+      <label class="fl"><span>Customer pain point</span><input name="pain_point" value="${esc(v.pain_point)}"></label>
+      <label class="fl full"><span>Main selling message</span><input name="message" value="${esc(v.message)}"></label>
+      ${hooks.map((h, i) => `<label class="fl full"><span>Hook ${i + 1}</span><input name="hook${i}" value="${esc(h)}"></label>`).join('')}
+      <label class="fl full"><span>Recommended creative types (comma separated)</span><input name="creative_types" value="${esc(v.creative_types.join(', '))}" placeholder="UGC testimonial, unboxing"></label>
+      <label class="fl full"><span>Why it could work</span><textarea name="why" rows="2">${esc(v.why)}</textarea></label>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">Save angle</button></div>
+  </form>`;
+  document.body.appendChild(m);
+  const close = () => m.remove();
+  m.querySelectorAll('[data-x]').forEach(b => b.onclick = close);
+  m.onclick = e => { if (e.target === m) close(); };
+  $('form', m).onsubmit = async e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    const body = { name: f.name, emotion: f.emotion, description: f.description, audience: f.audience, pain_point: f.pain_point, message: f.message,
+      hooks: [f.hook0, f.hook1, f.hook2].filter(x => x.trim()), creative_types: f.creative_types.split(',').map(x => x.trim()).filter(Boolean), why: f.why };
+    try {
+      if (a) await api(`/api/angles/${a.id}`, { method: 'PATCH', body });
+      else { const { id } = await api(`/api/products/${state.product}/angles`, { method: 'POST', body }); state.angleDraft.add(id); }
+      close(); toast('Angle saved'); renderStrategy();
+    } catch (err) { fail(err); }
+  };
+  setTimeout(() => $('[name=name]', m).focus(), 50);
+}
+
+// Step 4: the saved angles, ready for the next modules.
+function drawContinueStep() {
+  const chosen = state.strat.angles.filter(a => a.selected);
+  $('#stratBody').innerHTML = chosen.length ? `
+    <div class="card cont-hero"><div class="cont-ic">🚀</div><div><h2>${chosen.length} marketing angle${chosen.length > 1 ? 's' : ''} saved</h2>
+      <p class="muted">They are kept with the product for the next steps: scripts, storyboards and video editing.</p></div>
+      <div class="row"><button class="btn" id="ctBack">← Change the selection</button><a class="btn primary big" href="#product/${state.product}/scripts">Continue to scripts →</a></div></div>
+    <div class="cont-list">${chosen.map((a, i) => `<div class="cont-item"><span>${i + 1}</span><div><b>${esc(a.name)}</b><small>“${esc(a.message)}”</small>
+      <div class="cont-hooks">${a.hooks.map(h => `<em>${esc(h)}</em>`).join('')}</div></div></div>`).join('')}</div>`
+    : `<div class="card s-empty"><div class="s-empty-ic">🎯</div><h2>No angle saved yet</h2><p class="muted">Select angles in step 3 and save them.</p>
+      <button class="btn primary big" id="ctBack">Choose angles</button></div>`;
+  $('#ctBack').onclick = () => { state.stratStep = 'angles'; drawStrategy(); };
+}
 
 // Edit product: a live preview on the left (picture, name, status, markets, CTA banner), the form on the right.
 const REGIONS = [

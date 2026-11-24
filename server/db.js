@@ -138,6 +138,86 @@ CREATE TABLE IF NOT EXISTS inspirations (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 
+// ---------- Module 1: product analysis & marketing angles (additive only) ----------
+addColumn('products', 'description', "TEXT NOT NULL DEFAULT ''");   // product description (typed or imported)
+addColumn('products', 'price', "TEXT NOT NULL DEFAULT ''");         // selling price as typed, e.g. "780 ZMW" (optional)
+addColumn('products', 'offer', "TEXT NOT NULL DEFAULT ''");         // promotional offer, e.g. "Buy 2, get the 3rd free" (optional)
+addColumn('products', 'country', "TEXT NOT NULL DEFAULT ''");       // target country code (ZM, ZW…)
+addColumn('products', 'language', "TEXT NOT NULL DEFAULT 'en'");    // target language (en, sw, fr)
+db.exec(`
+-- Product pictures (uploaded or imported from the product page). products.image stays the main picture.
+CREATE TABLE IF NOT EXISTS product_images (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  source_url TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- AI product analysis: one row per run, the latest 'done' one is the current analysis.
+CREATE TABLE IF NOT EXISTS analyses (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed')),
+  data TEXT NOT NULL DEFAULT '{}',     -- JSON (server/strategy.js ANALYSIS_SCHEMA)
+  error TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+-- Marketing angles of a product (AI-made or custom). selected = kept for the next modules (scripts, storyboards).
+CREATE TABLE IF NOT EXISTS angles (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  analysis_id INTEGER REFERENCES analyses(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  audience TEXT NOT NULL DEFAULT '',
+  pain_point TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  emotion TEXT NOT NULL DEFAULT '',
+  hooks TEXT NOT NULL DEFAULT '[]',          -- JSON array of 3 hook lines (target language)
+  creative_types TEXT NOT NULL DEFAULT '[]', -- JSON array
+  why TEXT NOT NULL DEFAULT '',
+  selected INTEGER NOT NULL DEFAULT 0,
+  custom INTEGER NOT NULL DEFAULT 0,          -- 1 = written or edited by the team
+  position INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_angles_product ON angles(product_id, position);
+-- Background AI work, so the same work is never started twice and the page can show progress.
+CREATE TABLE IF NOT EXISTS ai_jobs (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                  -- analysis | angles | angle
+  target_id INTEGER,                   -- angle id for 'angle'
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed')),
+  error TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_product ON ai_jobs(product_id, status);
+-- Every AI call: tokens, time, success or error.
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                  -- import | analysis | angles | angle | scripts
+  product_id INTEGER,
+  model TEXT NOT NULL DEFAULT '',
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  ms INTEGER NOT NULL DEFAULT 0,
+  ok INTEGER NOT NULL DEFAULT 1,
+  error TEXT NOT NULL DEFAULT '',
+  user_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// A restart stops background work: mark it failed so it can be started again.
+db.exec(`UPDATE ai_jobs SET status = 'failed', error = 'Stopped by a server restart: try again', finished_at = datetime('now') WHERE status = 'running';
+  UPDATE analyses SET status = 'failed', error = 'Stopped by a server restart: try again', finished_at = datetime('now') WHERE status = 'running';`);
+
 export function tx(fn) {
   db.exec('BEGIN');
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }

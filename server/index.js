@@ -9,7 +9,9 @@ import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady, extractAudio } from './video.js';
 import { ttsReady, listVoices, composeMusic } from './tts.js';
-import { writeScripts, LANGUAGES, aiReady } from './ai.js';
+import { writeScripts, LANGUAGES, aiReady, aiMock } from './ai.js';
+import { safeGet, extractProduct } from './fetchpage.js';
+import { setMarkets, strategyState, startAnalysis, startAngles, startOneAngle, addCustomAngle, updateAngle, saveSelection, aiReadPage } from './strategy.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
 
 const app = express();
@@ -216,10 +218,148 @@ app.patch('/api/products/:id', (req, res) => {
   const markets = b.markets !== undefined ? JSON.stringify((Array.isArray(b.markets) ? b.markets : [])
     .filter(m => MARKETS[m?.code]).map(m => ({ code: m.code, price: str(m.price, 20) }))
     .filter((m, i, all) => all.findIndex(x => x.code === m.code) === i)) : p.markets;
-  db.prepare(`UPDATE products SET name = ?, notes = ?, banner = ?, status = ?, markets = ?, link_product = ?, link_alibaba = ?, link_amazon = ? WHERE id = ?`)
+  const country = keep('country', v => { const c = str(v, 2).toUpperCase(); if (c && !MARKETS[c]) throw new HttpError(400, 'Unknown country'); return c; });
+  const language = keep('language', v => { if (!LANGUAGES[v]) throw new HttpError(400, 'Unknown language'); return v; });
+  db.prepare(`UPDATE products SET name = ?, notes = ?, banner = ?, status = ?, markets = ?, link_product = ?, link_alibaba = ?, link_amazon = ?,
+      description = ?, price = ?, offer = ?, country = ?, language = ? WHERE id = ?`)
     .run(name, keep('notes', v => str(v, 4000)), keep('banner', v => str(v, 60)), status, markets,
-      keep('link_product', cleanUrl), keep('link_alibaba', cleanUrl), keep('link_amazon', cleanUrl), p.id);
+      keep('link_product', cleanUrl), keep('link_alibaba', cleanUrl), keep('link_amazon', cleanUrl),
+      keep('description', v => str(v, 8000)), keep('price', v => str(v, 40)), keep('offer', v => str(v, 200)), country, language, p.id);
   res.json({ ok: true });
+});
+
+// ---------- Module 1: product import, pictures, analysis and marketing angles ----------
+setMarkets(MARKETS);
+
+// Read a product page: name, description, price, pictures (the team checks and corrects before saving).
+const importing = new Set(); // one import at a time per user
+app.post('/api/import-url', async (req, res) => {
+  const url = str(req.body?.url, 1000);
+  if (!url) throw new HttpError(400, 'Paste the product page link');
+  if (importing.has(req.user.id)) throw new HttpError(409, 'An import is already running');
+  importing.add(req.user.id);
+  try {
+    const page = await safeGet(url);
+    if (!/html|xml|text/i.test(page.type)) throw new HttpError(400, 'This link is not a web page');
+    const found = extractProduct(page.body.toString('utf8'), page.url);
+    let ai = null, warning = '';
+    if (aiReady() || aiMock()) {
+      try { ai = await aiReadPage(found, req.user.id); } catch (e) { warning = `The AI could not read the page (${e.message}); basic information only.`; }
+    }
+    const pick = (a, b) => (a && String(a).trim()) || b || '';
+    res.json({
+      url: page.url,
+      name: pick(ai?.name, found.name).slice(0, 200),
+      description: pick(ai?.description, found.description).slice(0, 8000),
+      price: [pick(ai?.price, found.price), pick(ai?.currency, found.currency)].filter(Boolean).join(' '),
+      offer: ai?.offer || '',
+      images: found.images,
+      warning: warning || (!found.name && !found.description ? 'Little product information was found on this page: complete it by hand.' : ''),
+    });
+  } finally { importing.delete(req.user.id); }
+});
+
+// Pictures: upload, or download from links (e.g. the ones found by the import).
+const savePicture = (pid, file, sourceUrl = '') => {
+  const id = db.prepare(`INSERT INTO product_images (product_id, file, source_url) VALUES (?,?,?)`).run(pid, file, sourceUrl).lastInsertRowid;
+  const p = db.prepare(`SELECT image FROM products WHERE id = ?`).get(pid);
+  if (!p.image) db.prepare(`UPDATE products SET image = ? WHERE id = ?`).run(file, pid); // the first picture becomes the main one
+  return id;
+};
+app.post('/api/products/:id/images', (req, res, next) => mediaUpload.array('files')(req, res, next), (req, res) => {
+  const files = req.files || [];
+  try {
+    const p = productOr404(idParam(req.params.id));
+    const ok = files.filter(f => IMAGE_EXT.includes(extname(f.originalname).toLowerCase()));
+    if (!ok.length) throw new HttpError(400, `Send pictures (${IMAGE_EXT.join(' ')})`);
+    for (const f of ok) {
+      const name = `product-${p.id}-${randomBytes(6).toString('hex')}${extname(f.originalname).toLowerCase()}`;
+      renameSync(f.path, join(FILES_DIR, name));
+      savePicture(p.id, name);
+    }
+    res.status(201).json({ added: ok.length });
+  } finally { files.forEach(f => rmSync(f.path, { force: true })); }
+});
+app.post('/api/products/:id/images/from-urls', async (req, res) => {
+  const p = productOr404(idParam(req.params.id));
+  const urls = (Array.isArray(req.body?.urls) ? req.body.urls : []).map(u => str(u, 1000)).filter(Boolean).slice(0, 12);
+  if (!urls.length) throw new HttpError(400, 'No picture chosen');
+  const added = [], failed = [];
+  for (const u of urls) {
+    try {
+      const r = await safeGet(u, { accept: 'image/*', maxBytes: 8 * 1024 * 1024 });
+      const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[r.type.split(';')[0].trim().toLowerCase()];
+      if (!ext) throw new Error('not a picture');
+      const name = `product-${p.id}-${randomBytes(6).toString('hex')}${ext}`;
+      writeFileSync(join(FILES_DIR, name), r.body);
+      added.push(savePicture(p.id, name, u));
+    } catch (e) { failed.push(u); }
+  }
+  res.status(201).json({ added: added.length, failed });
+});
+app.post('/api/product-images/:id/main', (req, res) => {
+  const im = db.prepare(`SELECT * FROM product_images WHERE id = ?`).get(idParam(req.params.id));
+  if (!im) throw new HttpError(404, 'Picture not found');
+  db.prepare(`UPDATE products SET image = ? WHERE id = ?`).run(im.file, im.product_id);
+  res.json({ ok: true });
+});
+app.delete('/api/product-images/:id', (req, res) => {
+  const im = db.prepare(`SELECT * FROM product_images WHERE id = ?`).get(idParam(req.params.id));
+  if (!im) throw new HttpError(404, 'Picture not found');
+  db.prepare(`DELETE FROM product_images WHERE id = ?`).run(im.id);
+  const p = db.prepare(`SELECT image FROM products WHERE id = ?`).get(im.product_id);
+  if (p?.image === im.file) {
+    const next = db.prepare(`SELECT file FROM product_images WHERE product_id = ? ORDER BY id LIMIT 1`).get(im.product_id);
+    db.prepare(`UPDATE products SET image = ? WHERE id = ?`).run(next?.file || '', im.product_id);
+  }
+  removeFile(FILES_DIR, im.file);
+  res.json({ ok: true });
+});
+app.get('/media/product-image/:id', (req, res) => {
+  const im = db.prepare(`SELECT file FROM product_images WHERE id = ?`).get(idParam(req.params.id));
+  if (!im) throw new HttpError(404, 'Picture not found');
+  res.sendFile(join(FILES_DIR, im.file), { headers: { 'Cache-Control': 'private, max-age=3600' } });
+});
+
+// Strategy: analysis, angles and running AI work of a product.
+app.get('/api/products/:id/strategy', (req, res) => {
+  const p = productOr404(idParam(req.params.id));
+  res.json({ ...strategyState(p.id), ai: aiReady() || aiMock(), mock: aiMock() });
+});
+app.post('/api/products/:id/analyze', (req, res) => {
+  const p = productOr404(idParam(req.params.id));
+  if (!aiReady() && !aiMock()) throw new HttpError(503, 'AI is not set up: add ANTHROPIC_API_KEY to the server settings.');
+  res.status(202).json({ job: startAnalysis(p.id, req.user.id, { thenAngles: req.body?.then_angles !== false }) });
+});
+app.post('/api/products/:id/angles/generate', (req, res) => {
+  const p = productOr404(idParam(req.params.id));
+  if (!aiReady() && !aiMock()) throw new HttpError(503, 'AI is not set up: add ANTHROPIC_API_KEY to the server settings.');
+  res.status(202).json({ job: startAngles(p.id, req.user.id) });
+});
+app.post('/api/angles/:id/regenerate', (req, res) => {
+  if (!aiReady() && !aiMock()) throw new HttpError(503, 'AI is not set up: add ANTHROPIC_API_KEY to the server settings.');
+  res.status(202).json({ job: startOneAngle(idParam(req.params.id), req.user.id) });
+});
+app.post('/api/products/:id/angles', (req, res) => {
+  res.status(201).json({ id: addCustomAngle(idParam(req.params.id), req.body || {}, req.user.id) });
+});
+app.patch('/api/angles/:id', (req, res) => { updateAngle(idParam(req.params.id), req.body || {}); res.json({ ok: true }); });
+app.delete('/api/angles/:id', (req, res) => {
+  const r = db.prepare(`DELETE FROM angles WHERE id = ?`).run(idParam(req.params.id));
+  if (!r.changes) throw new HttpError(404, 'Angle not found');
+  res.json({ ok: true });
+});
+app.post('/api/products/:id/angles/selection', (req, res) => {
+  res.json({ selected: saveSelection(idParam(req.params.id), req.body?.ids) });
+});
+
+// AI usage (admin): calls, tokens, errors over the last 30 days.
+app.get('/api/ai-usage', requireAdmin, (req, res) => {
+  res.json({
+    byKind: db.prepare(`SELECT kind, COUNT(*) calls, SUM(ok) ok, SUM(1 - ok) failed, SUM(input_tokens) input_tokens, SUM(output_tokens) output_tokens, ROUND(AVG(ms)) avg_ms
+      FROM ai_usage WHERE created_at > datetime('now', '-30 days') GROUP BY kind ORDER BY calls DESC`).all(),
+    lastErrors: db.prepare(`SELECT kind, product_id, error, created_at FROM ai_usage WHERE ok = 0 ORDER BY id DESC LIMIT 20`).all(),
+  });
 });
 
 app.delete('/api/products/:id', requireAdmin, (req, res) => {
@@ -228,12 +368,13 @@ app.delete('/api/products/:id', requireAdmin, (req, res) => {
   const creatives = db.prepare(`SELECT id, file FROM creatives WHERE product_id = ?`).all(p.id);
   const raws = db.prepare(`SELECT file FROM raws WHERE product_id = ? AND status <> 'splitting'`).all(p.id);
   const insp = db.prepare(`SELECT id, file FROM inspirations WHERE product_id = ?`).all(p.id);
+  const pimgs = db.prepare(`SELECT file FROM product_images WHERE product_id = ?`).all(p.id);
   db.prepare(`DELETE FROM products WHERE id = ?`).run(p.id);
   for (const c of clips) { removeFile(CLIPS_DIR, c.file); rmSync(thumbOf('clip', c.id), { force: true }); }
   for (const c of creatives) { removeFile(RENDERS_DIR, c.file); rmSync(thumbOf('creative', c.id), { force: true }); }
   for (const r of raws) removeFile(RAW_DIR, r.file);
   for (const i of insp) { removeFile(FILES_DIR, i.file); rmSync(thumbOf('insp', i.id), { force: true }); }
-  if (p.image) removeFile(FILES_DIR, p.image);
+  for (const f of new Set([p.image, ...pimgs.map(x => x.file)].filter(Boolean))) removeFile(FILES_DIR, f);
   res.json({ ok: true });
 });
 
