@@ -1305,66 +1305,114 @@ async function createAds() {
 }
 
 
-// Scripts: AI writer + list.
+// Scripts: AI script studio + the product's scripts.
+const scriptText = s => [s.hook, s.body, s.cta].filter(Boolean).join(' ');
+const wordsOf = t => (String(t || '').trim().match(/\S+/g) || []).length;
 function renderScripts() {
   const { scripts } = state.data;
   const langs = ME.languages;
   const t = $('#tab');
+  const g = state.scriptGen ??= { language: Object.keys(langs)[0], style: 'bss', count: 3, extra: '' };
+  const lf = state.scriptLang || 'all';
+  const list = scripts.filter(s => lf === 'all' || s.language === lf);
+  const totalSec = scripts.reduce((n, s) => n + wordsOf(scriptText(s)) / 2.6, 0);
   t.innerHTML = `
-    <form class="card" id="genForm">
-      <h2>✨ Write scripts with AI</h2>
-      ${ME.ai ? '' : '<p class="small" style="color:var(--bad)">AI is not set up on the server yet (ANTHROPIC_API_KEY). You can still add scripts by hand.</p>'}
-      <div class="row" style="align-items:end">
-        <div style="width:160px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div style="width:210px"><label class="f">Style</label><select name="style"><option value="bss">BSS: gift story, ~25 s, one voice</option><option value="classic">Classic: short script</option></select></div>
-        <div style="width:110px"><label class="f">How many</label><input type="number" name="count" min="1" max="6" value="3"></div>
-        <div style="flex:1;min-width:220px"><label class="f">Extra instructions (optional)</label><input type="text" name="extra" placeholder="e.g. target mothers, use a gift angle, mention 2-for-1 offer"></div>
-        <button class="btn primary" ${ME.ai ? '' : 'disabled'}>Generate</button>
+    <form class="ss-hero" id="genForm">
+      <div class="ss-hero-top">
+        <div><span class="ag-kicker">AI script studio</span><h2>✍️ Voice-over scripts that sell</h2>
+          <p>The AI reads the product, its analysis and your angles, then writes the voice-over, the post text and the headline.</p></div>
+        <div class="ag-hero-stats"><div><b>${scripts.length}</b><span>Scripts</span></div><div><b>${Object.keys(langs).filter(k => scripts.some(s => s.language === k)).length}</b><span>Languages</span></div><div><b>${totalSec < 90 ? `${Math.round(totalSec)}s` : `${Math.round(totalSec / 60)}m`}</b><span>Of voice-over</span></div></div>
       </div>
-      <p class="small muted" style="margin-bottom:0">The AI uses the product information. Each script comes with its post text and headline.</p>
+      ${ME.ai ? '' : '<div class="ss-warn">AI is not set up on the server yet (ANTHROPIC_API_KEY). You can still add scripts by hand below.</div>'}
+      <div class="ss-grid">
+        <div class="ss-field"><label>Language</label>
+          <div class="ss-seg">${Object.entries(langs).map(([k, l]) => `<button type="button" data-lang="${k}" class="${g.language === k ? 'on' : ''}">${esc(l)}</button>`).join('')}</div></div>
+        <div class="ss-field"><label>How many</label>
+          <div class="ss-step"><button type="button" data-step="-1">−</button><b id="ssCount">${g.count}</b><button type="button" data-step="1">＋</button></div></div>
+        <div class="ss-field wide"><label>Style</label>
+          <div class="ss-styles">
+            <button type="button" data-style="bss" class="${g.style === 'bss' ? 'on' : ''}"><i>🎁</i><div><b>BSS gift story</b><small>One warm voice, ~25 s, montage of close-ups</small></div></button>
+            <button type="button" data-style="classic" class="${g.style === 'classic' ? 'on' : ''}"><i>⚡</i><div><b>Classic</b><small>Short and direct, 15-20 s</small></div></button>
+          </div></div>
+        <div class="ss-field wide"><label>Extra instructions <small>optional</small></label>
+          <textarea id="ssExtra" rows="2" placeholder="e.g. target mothers, use a gift angle, mention the 2-for-1 offer">${esc(g.extra)}</textarea>
+          <div class="ss-angles" id="ssAngles"></div></div>
+      </div>
+      <div class="ss-go"><span class="small">Each script comes with its post text and headline.</span>
+        <button class="btn primary big" id="ssGen" ${ME.ai ? '' : 'disabled'}>✨ Write ${g.count} script${g.count > 1 ? 's' : ''}</button></div>
     </form>
-    <details class="card" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">✍️ Add a script by hand</summary>
+
+    <details class="ss-hand"><summary><span>✍️</span><div><b>Write a script yourself</b><small>Paste or type a voice-over: the platform prepares it for the video by itself.</small></div></summary>
       <form id="manForm">
-        <div class="row"><div style="width:160px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div class="row"><div style="width:170px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
         <div style="flex:1"><label class="f">Angle</label><input type="text" name="angle" placeholder="e.g. testimonial"></div></div>
-        <label class="f">Script (what the voice says)</label><textarea name="script" rows="6" required placeholder="Write the whole script: the platform splits it for the video by itself."></textarea>
-        <label class="f">Post text (optional)</label><textarea name="primary_text"></textarea>
-        <label class="f">Headline (optional)</label><input type="text" name="headline">
+        <label class="f">Script (what the voice says)</label><textarea name="script" rows="5" required placeholder="Write the whole script…"></textarea>
+        <div class="row"><div style="flex:2"><label class="f">Post text (optional)</label><textarea name="primary_text" rows="3"></textarea></div>
+        <div style="flex:1"><label class="f">Headline (optional)</label><input type="text" name="headline"></div></div>
         <button class="btn primary" style="margin-top:10px">Save script</button>
       </form>
     </details>
-    <div class="grid scripts" style="margin-top:16px">
-      ${scripts.map(s => `
-        <div class="card script" data-id="${s.id}">
-          <div class="row spread"><div class="chips"><span class="chip">${esc((langs[s.language] || s.language))}</span>${s.style === 'bss' ? '<span class="chip win">BSS</span>' : ''}${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
-            <div class="row"><button class="btn sm" data-copy>Copy</button><button class="btn sm danger" data-del>✕</button></div></div>
-          <div class="script-text">${esc([s.hook, s.body, s.cta].filter(Boolean).join(' '))}</div>
-          ${s.primary_text || s.headline ? `<details><summary>Ad copy</summary>${s.headline ? `<div style="margin-top:6px"><b>${esc(s.headline)}</b></div>` : ''}<pre>${esc(s.primary_text)}</pre></details>` : ''}
-          <div class="small muted" style="margin-top:8px">${esc(s.author || '')} · ${esc(s.created_at.slice(0, 16))}</div>
-        </div>`).join('')}
-    </div>
-    ${scripts.length ? '' : '<div class="empty">No script yet.</div>'}`;
 
+    ${scripts.length ? `<div class="ss-bar">
+      <div class="ss-filter">${[['all', 'All'], ...Object.entries(langs)].map(([k, l]) => { const n = k === 'all' ? scripts.length : scripts.filter(s => s.language === k).length; return n || k === 'all' ? `<button data-lf="${k}" class="${lf === k ? 'on' : ''}">${esc(l)} <i>${n}</i></button>` : ''; }).join('')}</div>
+    </div>` : ''}
+    <div class="ss-list">
+      ${list.map((s, i) => {
+        const text = scriptText(s), w = wordsOf(text), sec = Math.round(w / 2.6);
+        const first = (text.match(/^[^.!?…]+[.!?…]+/) || [''])[0];
+        return `<article class="ss-card th${i % 8}" data-id="${s.id}">
+          <header><div class="ss-tags"><span class="ss-lang">${esc(langs[s.language] || s.language)}</span>${s.style === 'bss' ? '<span class="ss-style">🎁 BSS</span>' : '<span class="ss-style">⚡ Classic</span>'}</div>
+            <h3>${esc(s.angle || 'Script')}</h3>
+            <div class="ss-meta"><span>⏱ ~${sec} s</span><span>📝 ${w} words</span></div></header>
+          <div class="ss-text"><span class="ss-open">${esc(first)}</span>${esc(text.slice(first.length))}</div>
+          ${s.primary_text || s.headline ? `<details class="ss-copy"><summary>📣 Ad copy for the post</summary>
+            <div class="ss-post"><pre>${esc(s.primary_text)}</pre>${s.headline ? `<div class="ss-headline"><small>HEADLINE</small><b>${esc(s.headline)}</b><span>Order now</span></div>` : ''}</div></details>` : ''}
+          <footer><span class="muted small">${esc(s.author || '')} · ${esc(s.created_at.slice(0, 16))}</span>
+            <div class="row"><button class="btn sm" data-copy title="Copy the voice-over">📋 Script</button>${s.primary_text || s.headline ? '<button class="btn sm" data-copyall title="Copy script, headline and post text">📋 All</button>' : ''}<button class="icon-btn danger" data-del title="Delete">🗑</button></div></footer>
+        </article>`;
+      }).join('')}
+    </div>
+    ${scripts.length ? '' : '<div class="empty card">No script yet: write the first ones with the AI above.</div>'}`;
+
+  // Generator choices (remembered while you stay on the page)
+  const genBtn = $('#ssGen');
+  const syncBtn = () => { genBtn.textContent = `✨ Write ${g.count} script${g.count > 1 ? 's' : ''}`; };
+  t.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => { g.language = b.dataset.lang; t.querySelectorAll('[data-lang]').forEach(x => x.classList.toggle('on', x === b)); });
+  t.querySelectorAll('[data-style]').forEach(b => b.onclick = () => { g.style = b.dataset.style; t.querySelectorAll('[data-style]').forEach(x => x.classList.toggle('on', x === b)); });
+  t.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { g.count = Math.min(6, Math.max(1, g.count + Number(b.dataset.step))); $('#ssCount').textContent = g.count; syncBtn(); });
+  $('#ssExtra').oninput = e => { g.extra = e.target.value; };
+  // The saved marketing angles, one click to use them.
+  api(`/api/products/${state.product}/strategy`).then(st => {
+    const box = $('#ssAngles');
+    const angles = (st.angles || []).filter(a => a.selected);
+    if (!box || !angles.length) return;
+    box.innerHTML = `<small>Use a saved angle:</small>${angles.map(a => `<button type="button" data-ang="${a.id}" title="${esc(a.message)}">🎯 ${esc(a.name)}</button>`).join('')}`;
+    box.querySelectorAll('[data-ang]').forEach(b => b.onclick = () => {
+      const a = angles.find(x => x.id === Number(b.dataset.ang));
+      const line = `Angle "${a.name}": ${a.message}${a.audience ? ` (audience: ${a.audience})` : ''}`;
+      g.extra = g.extra.includes(line) ? g.extra : (g.extra ? g.extra.trim() + '\n' : '') + line;
+      $('#ssExtra').value = g.extra; b.classList.add('on');
+    });
+  }).catch(() => {});
   $('#genForm').onsubmit = async e => {
     e.preventDefault();
-    const btn = $('button', e.target);
-    btn.disabled = true; btn.textContent = 'Writing… (up to a minute)';
+    genBtn.disabled = true; genBtn.innerHTML = '<span class="spin sm"></span> Writing… (up to a minute)';
     try {
-      const { ids } = await api(`/api/products/${state.product}/scripts/generate`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      const { ids } = await api(`/api/products/${state.product}/scripts/generate`, { method: 'POST', body: { language: g.language, style: g.style, count: g.count, extra: g.extra } });
       toast(`${ids.length} script(s) written`);
       renderProduct(state.product);
-    } catch (err) { fail(err); btn.disabled = false; btn.textContent = 'Generate'; }
+    } catch (err) { fail(err); genBtn.disabled = false; syncBtn(); }
   };
   $('#manForm').onsubmit = async e => {
     e.preventDefault();
     try { await api(`/api/products/${state.product}/scripts`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); renderProduct(state.product); } catch (err) { fail(err); }
   };
-  t.querySelectorAll('.script').forEach(el => {
+  t.querySelectorAll('[data-lf]').forEach(b => b.onclick = () => { state.scriptLang = b.dataset.lf; renderScripts(); });
+  t.querySelectorAll('.ss-card').forEach(el => {
     const s = scripts.find(x => x.id === Number(el.dataset.id));
-    $('[data-copy]', el).onclick = () => {
-      const txt = `${[s.hook, s.body, s.cta].filter(Boolean).join(' ')}${s.headline ? `\n\nHEADLINE:\n${s.headline}` : ''}${s.primary_text ? `\n\nPOST TEXT:\n${s.primary_text}` : ''}`;
-      navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => fail(new Error('Copy failed')));
-    };
+    const copy = txt => navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => fail(new Error('Copy failed')));
+    $('[data-copy]', el).onclick = () => copy(scriptText(s));
+    $('[data-copyall]', el)?.addEventListener('click', () => copy(`${scriptText(s)}${s.headline ? `\n\nHEADLINE:\n${s.headline}` : ''}${s.primary_text ? `\n\nPOST TEXT:\n${s.primary_text}` : ''}`));
     $('[data-del]', el).onclick = async () => {
       if (!confirm('Delete this script?')) return;
       try { await api(`/api/scripts/${s.id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
