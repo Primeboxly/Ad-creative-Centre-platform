@@ -121,7 +121,8 @@ function route() {
 const P_STATUS = { idea: '💡 Idea', testing: '🧪 Testing', scaling: '🚀 Scaling', paused: '⏸ Paused' };
 let MARKETS = null;
 const loadMarkets = async () => (MARKETS ??= await api('/api/markets').catch(() => ({})));
-const marketBadges = (list = []) => list.map(m => `<span class="mk" title="${esc(MARKETS?.[m.code]?.name || m.code)}">${esc(m.code)}</span>`).join('');
+const flag = (code, size = '') => `<span class="flag f-${esc(code)} ${size}" title="${esc(MARKETS?.[code]?.name || code)}"></span>`;
+const marketBadges = (list = []) => list.map(m => `<span class="mkf">${flag(m.code)}${esc(m.code)}</span>`).join('');
 const productPic = p => (p.image ? `/media/product/${p.id}/image?v=${encodeURIComponent(p.image)}` : p.cover_clip ? `/media/thumb/clip/${p.cover_clip}` : '');
 const ago = iso => {
   if (!iso) return '';
@@ -200,7 +201,7 @@ async function renderProduct(id) {
       <div class="phero-main">
         <div class="row" style="gap:6px">
           <select id="pStatus" class="pst-sel st-${p.status}">${Object.entries(P_STATUS).map(([k, l]) => `<option value="${k}" ${k === p.status ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          ${p.markets.map(m => `<span class="mk big">${esc(m.code)} <small>${esc(MARKETS[m.code]?.name || '')}</small></span>`).join('')}
+          ${p.markets.map(m => `<span class="mkf">${flag(m.code)}${esc(MARKETS[m.code]?.name || m.code)}</span>`).join('')}
         </div>
         <h1>${esc(p.name)}</h1>
         <div class="phero-meta">
@@ -274,7 +275,7 @@ function renderOverview() {
       <div class="ov-side">
         <div class="card">
           <div class="row spread"><h2 style="margin:0">Markets</h2><button class="btn sm" id="ovMk">✏️</button></div>
-          ${p.markets.length ? p.markets.map(m => `<div class="mrow"><span class="mk big">${esc(m.code)}</span><b>${esc(MARKETS[m.code]?.name || m.code)}</b>
+          ${p.markets.length ? p.markets.map(m => `<div class="mrow">${flag(m.code, 'lg')}<b>${esc(MARKETS[m.code]?.name || m.code)}</b>
             <span class="mprice">${m.price ? `${esc(m.price)} <small>${esc(MARKETS[m.code]?.currency || '')}</small>` : '<span class="muted small">no price</span>'}</span></div>`).join('')
             : '<div class="st-empty" style="margin-top:10px">Where do you sell it? Click ✏️</div>'}
         </div>
@@ -300,44 +301,141 @@ function renderOverview() {
   $('#ovSave').onclick = () => api(`/api/products/${p.id}`, { method: 'PATCH', body: { notes: $('#ovNotes').value } }).then(() => toast('Notes saved'), fail);
 }
 
-// Edit: name, links, CTA banner, markets with prices.
+// Edit product: a live preview on the left (picture, name, status, markets, CTA banner), the form on the right.
+const REGIONS = [
+  ['Southern Africa', ['ZM', 'ZW', 'MW', 'MZ', 'BW', 'NA']],
+  ['East Africa', ['KE', 'TZ', 'UG', 'RW']],
+  ['West & Central Africa', ['NG', 'GH', 'CI', 'SN', 'CM', 'CD']],
+  ['North Africa', ['MA']],
+];
 function editProduct(p) {
+  const draft = { name: p.name, status: p.status, banner: p.banner, link_product: p.link_product, link_alibaba: p.link_alibaba,
+    link_amazon: p.link_amazon, markets: p.markets.map(m => ({ ...m })) };
+  const pic = productPic({ ...p, cover_clip: state.data?.clips?.[0]?.id });
   const m = document.createElement('div');
   m.className = 'studio-wrap center';
-  const rows = () => Object.entries(MARKETS).map(([code, x]) => {
-    const cur = p.markets.find(mm => mm.code === code);
-    return `<label class="mk-opt ${cur ? 'on' : ''}"><input type="checkbox" data-mk="${code}" ${cur ? 'checked' : ''}>
-      <span class="mk big">${code}</span><span class="mk-n">${esc(x.name)}</span>
-      <input type="text" data-price="${code}" placeholder="price ${x.currency}" value="${esc(cur?.price || '')}"></label>`;
-  }).join('');
-  m.innerHTML = `<form class="modal-card" id="peForm">
-    <div class="row spread"><h2 style="margin:0">✏️ Edit product</h2><button type="button" class="btn ghost" data-x>✕</button></div>
-    <label class="f">Name</label><input type="text" name="name" value="${esc(p.name)}" required>
-    <div class="two-col">
-      <div><label class="f">🛒 Product page</label><input type="text" name="link_product" value="${esc(p.link_product)}" placeholder="https://savaro.storeep.com/…"></div>
-      <div><label class="f">🏭 Alibaba / 1688</label><input type="text" name="link_alibaba" value="${esc(p.link_alibaba)}" placeholder="https://www.alibaba.com/…"></div>
-      <div><label class="f">📦 Amazon</label><input type="text" name="link_amazon" value="${esc(p.link_amazon)}" placeholder="https://www.amazon.com/…"></div>
-      <div><label class="f">CTA banner on videos</label><input type="text" name="banner" maxlength="60" value="${esc(p.banner)}" placeholder="PAY ON DELIVERY · 680 ZMW"></div>
-    </div>
-    <label class="f">Markets and prices</label>
-    <div class="mk-grid">${rows()}</div>
-    <div class="row" style="margin-top:16px;justify-content:flex-end"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">Save</button></div>
-  </form>`;
   document.body.appendChild(m);
-  const close = () => m.remove();
+  document.body.classList.add('noscroll');
+
+  const linkField = (key, icon, label, ph) => `<div><div class="pe-lab">${label}</div>
+    <div class="field"><span class="fi">${icon}</span><input type="text" data-k="${key}" value="${esc(draft[key])}" placeholder="${ph}">
+      <a class="open" data-open="${key}" target="_blank" rel="noopener" ${draft[key] ? `href="${esc(draft[key])}"` : 'hidden'}>Open ↗</a></div></div>`;
+
+  function preview() {
+    $('#pePrevName').textContent = draft.name || 'Product name';
+    $('#pePrevStatus').innerHTML = `<span class="pst st-${draft.status}">${P_STATUS[draft.status]}</span>`;
+    $('#pePrevMk').innerHTML = draft.markets.map(x => `<span class="mkf dark">${flag(x.code)}${esc(x.code)}${x.price ? ` · ${esc(x.price)} ${esc(MARKETS[x.code]?.currency || '')}` : ''}</span>`).join('')
+      || '<span class="small" style="color:#8e92a0">No market yet</span>';
+    $('#pePrevBanner').textContent = draft.banner || 'PAY ON DELIVERY';
+  }
+  function prices() {
+    $('#pePrices').innerHTML = draft.markets.map(x => `<div class="price-row">${flag(x.code, 'lg')}<b>${esc(MARKETS[x.code]?.name || x.code)}</b>
+      <div class="price-in"><input type="text" inputmode="decimal" data-price="${x.code}" value="${esc(x.price || '')}" placeholder="0"><span>${esc(MARKETS[x.code]?.currency || '')}</span></div></div>`).join('')
+      || '<div class="st-empty">Tick the countries where you sell this product.</div>';
+    m.querySelectorAll('[data-price]').forEach(inp => inp.oninput = () => {
+      draft.markets.find(x => x.code === inp.dataset.price).price = inp.value.trim();
+      preview();
+    });
+  }
+
+  m.innerHTML = `<form class="pe" id="peForm">
+    <aside class="pe-preview">
+      <h3>Preview</h3>
+      <label class="pe-pic">${pic ? `<img src="${pic}" alt="" id="pePicImg">` : '<span id="pePicImg">📷<br>Add a picture</span>'}
+        <span class="pe-pic-btn">📷 Change picture</span><input type="file" accept="image/*" class="hidden" id="pePicIn"></label>
+      <div id="pePrevStatus"></div>
+      <div class="pe-name" id="pePrevName"></div>
+      <div class="pe-mk" id="pePrevMk"></div>
+      <h3>CTA on the videos</h3>
+      <div class="pe-banner"><span id="pePrevBanner"></span><small>last seconds of each ad</small></div>
+    </aside>
+
+    <div class="pe-form">
+      <div class="pe-head"><h2>Edit product</h2><button type="button" class="btn ghost" data-x aria-label="Close">✕</button></div>
+      <div class="pe-body">
+        <section class="pe-sec">
+          <h4><span class="ic">🏷️</span>Identity</h4>
+          <div class="pe-lab">Name</div>
+          <div class="field"><span class="fi">✏️</span><input type="text" data-k="name" value="${esc(draft.name)}" required placeholder="Product name"></div>
+          <div class="pe-lab" style="margin-top:12px">Status</div>
+          <div class="seg-ctl" id="peStatus">${Object.entries(P_STATUS).map(([k, l]) => `<button type="button" data-st="${k}" class="${k === draft.status ? 'on' : ''}">${l}</button>`).join('')}</div>
+        </section>
+
+        <section class="pe-sec">
+          <h4><span class="ic">🔗</span>Links</h4>
+          <div class="pe-links">
+            ${linkField('link_product', '🛒', 'Product page (our store)', 'https://savaro.storeep.com/products/…')}
+            <div class="pe-grid2">
+              ${linkField('link_alibaba', '🏭', 'Alibaba / 1688', 'https://www.alibaba.com/product-detail/…')}
+              ${linkField('link_amazon', '📦', 'Amazon', 'https://www.amazon.com/dp/…')}
+            </div>
+          </div>
+        </section>
+
+        <section class="pe-sec">
+          <h4><span class="ic">🌍</span>Markets &amp; prices<small id="peMkCount"></small></h4>
+          ${REGIONS.map(([name, codes]) => `<div class="reg"><div class="reg-h">${name}</div><div class="mk-pills">
+            ${codes.filter(c => MARKETS[c]).map(c => `<button type="button" class="mk-pill ${draft.markets.some(x => x.code === c) ? 'on' : ''}" data-mk="${c}">
+              <span class="ck">✓</span>${flag(c)}${esc(MARKETS[c].name)}</button>`).join('')}
+          </div></div>`).join('')}
+          <div class="prices" id="pePrices"></div>
+        </section>
+
+        <section class="pe-sec">
+          <h4><span class="ic">📣</span>CTA banner on videos</h4>
+          <div class="field"><span class="fi">🟧</span><input type="text" data-k="banner" maxlength="60" value="${esc(draft.banner)}" placeholder="PAY ON DELIVERY · 680 ZMW"></div>
+          <p class="small muted" style="margin:6px 0 0">Shown on the CTA of Classic ads. Empty = "Pay on delivery" in the script's language.</p>
+        </section>
+      </div>
+      <div class="pe-foot"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary big">Save changes</button></div>
+    </div>
+  </form>`;
+
+  const close = () => { m.remove(); document.body.classList.remove('noscroll'); };
   m.querySelectorAll('[data-x]').forEach(b => b.onclick = close);
   m.onclick = e => { if (e.target === m) close(); };
-  m.querySelectorAll('[data-mk]').forEach(cb => cb.onchange = () => cb.closest('.mk-opt').classList.toggle('on', cb.checked));
-  $('#peForm').onsubmit = async e => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    const markets = [...m.querySelectorAll('[data-mk]:checked')].map(cb => ({ code: cb.dataset.mk, price: m.querySelector(`[data-price="${cb.dataset.mk}"]`).value }));
+  m.querySelectorAll('[data-k]').forEach(inp => inp.oninput = () => {
+    draft[inp.dataset.k] = inp.value;
+    const open = m.querySelector(`[data-open="${inp.dataset.k}"]`);
+    if (open) { const ok = /^(https?:\/\/)?[\w-]+(\.[\w-]+)+/.test(inp.value.trim()); open.hidden = !ok; if (ok) open.href = /^https?:/i.test(inp.value) ? inp.value : 'https://' + inp.value.trim(); }
+    preview();
+  });
+  m.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
+    draft.status = b.dataset.st;
+    m.querySelectorAll('[data-st]').forEach(x => x.classList.toggle('on', x === b));
+    preview();
+  });
+  m.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => {
+    const c = b.dataset.mk, i = draft.markets.findIndex(x => x.code === c);
+    if (i >= 0) draft.markets.splice(i, 1); else draft.markets.push({ code: c, price: '' });
+    b.classList.toggle('on', i < 0);
+    $('#peMkCount').textContent = draft.markets.length ? `${draft.markets.length} selected` : '';
+    prices(); preview();
+  });
+  $('#pePicIn').onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
     try {
-      await api(`/api/products/${p.id}`, { method: 'PATCH', body: { name: f.name, link_product: f.link_product, link_alibaba: f.link_alibaba, link_amazon: f.link_amazon, banner: f.banner, markets } });
-      close(); toast('Saved'); renderProduct(p.id);
+      const r = await fetch(`/api/products/${p.id}/image`, { method: 'POST', body: fd });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed');
+      const url = URL.createObjectURL(f);
+      $('#pePicImg').outerHTML = `<img src="${url}" alt="" id="pePicImg">`;
+      toast('Picture saved');
     } catch (err) { fail(err); }
   };
+  $('#peForm').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api(`/api/products/${p.id}`, { method: 'PATCH', body: draft });
+      close(); toast('Saved'); renderProduct(p.id); refreshSide();
+    } catch (err) { fail(err); }
+  };
+  $('#peMkCount').textContent = draft.markets.length ? `${draft.markets.length} selected` : '';
+  prices(); preview();
+  setTimeout(() => m.querySelector('[data-k="name"]').focus(), 50);
 }
+
 
 // Inspiration: ads and screenshots the team wants to copy the style of.
 function renderInspiration() {
