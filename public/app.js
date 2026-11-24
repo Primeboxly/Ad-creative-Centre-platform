@@ -611,31 +611,49 @@ function drawAnglesStep() {
     ${allJob ? working(jobOf('analysis') ? 'Analysing the product…' : 'Writing the marketing angles…', 'Selected and edited angles are kept.', allJob) : ''}
     ${!allJob && lastAll?.status === 'failed' ? failedBox(`Angles failed: ${lastAll.error}`, 'agRetry') : ''}
     ${!s.analysis && !allJob ? `<div class="card s-empty"><div class="s-empty-ic">🎯</div><h2>Analyse the product first</h2><button class="btn primary big" id="agToAn">Go to analysis</button></div>` : `
-    <div class="ag-tools">
-      <div><h2>🎯 Marketing angles <small>${s.angles.length}</small></h2><small class="muted">Click a card to select it. Each angle = a different selling message.</small></div>
-      <div class="row">
+    <div class="ag-hero">
+      <div class="ag-hero-txt">
+        <span class="ag-kicker">Step 3 · Choose your messages</span>
+        <h2>🎯 ${s.angles.length} marketing angles</h2>
+        <p>Each angle is a different reason to buy. Pick the ones to turn into ads.</p>
+      </div>
+      <div class="ag-hero-stats">
+        <div><b>${s.angles.length}</b><span>Angles</span></div>
+        <div class="hot"><b>${sel.size}</b><span>Selected</span></div>
+        <div><b>${s.angles.reduce((n, a) => n + a.hooks.length, 0)}</b><span>Opening lines</span></div>
+      </div>
+      <div class="ag-hero-btns">
         <button class="btn" id="agCustom">＋ Custom angle</button>
         <button class="btn" id="agAll" ${allJob ? 'disabled' : ''}>↻ Regenerate all</button>
       </div>
     </div>
     <div class="angles">
-      ${s.angles.map(a => {
+      ${s.angles.map((a, i) => {
         const busy = jobOf('angle', a.id);
-        return `<article class="angle ${sel.has(a.id) ? 'on' : ''} ${busy ? 'busy' : ''}" data-angle="${a.id}">
-          <div class="ang-top"><span class="ang-check">${sel.has(a.id) ? '✓' : ''}</span>
-            <h3>${esc(a.name)}</h3>${a.custom ? '<span class="chip">✏️ edited</span>' : ''}</div>
-          ${a.emotion ? `<span class="ang-emo">❤ ${esc(a.emotion)}</span>` : ''}
-          <p class="ang-desc">${esc(a.description)}</p>
-          <div class="ang-msg">“${esc(a.message)}”</div>
-          <div class="ang-meta"><div><span>👥 Audience</span>${esc(a.audience)}</div><div><span>😣 Pain point</span>${esc(a.pain_point)}</div></div>
-          <div class="ang-hooks"><span>🎣 Opening lines</span>${a.hooks.map((h, i) => `<p><b>${i + 1}</b>${esc(h)}</p>`).join('')}</div>
-          <div class="ang-types">${a.creative_types.map(c => `<span class="chip">${esc(c)}</span>`).join('')}</div>
-          ${a.why ? `<details class="ang-why"><summary>Why it could work</summary><p>${esc(a.why)}</p></details>` : ''}
-          <div class="ang-actions">
+        return `<article class="angle th${i % 8} ${sel.has(a.id) ? 'on' : ''} ${busy ? 'busy' : ''}" data-angle="${a.id}">
+          <header class="ang-head">
+            <span class="ang-num">${String(i + 1).padStart(2, '0')}</span>
+            <div class="ang-title"><h3>${esc(a.name)}</h3>${a.emotion ? `<span class="ang-emo">${esc(a.emotion)}</span>` : ''}</div>
+            <span class="ang-check" title="Select">${sel.has(a.id) ? '✓' : '＋'}</span>
+            ${a.custom ? '<span class="ang-edited">✏️ edited</span>' : ''}
+          </header>
+          <div class="ang-msg"><span>Selling message</span><p>${esc(a.message)}</p></div>
+          <div class="ang-in">
+            <p class="ang-desc">${esc(a.description)}</p>
+            <div class="ang-meta">
+              <div class="ang-tile"><i>👥</i><div><span>Who</span>${esc(a.audience)}</div></div>
+              <div class="ang-tile pain"><i>💢</i><div><span>Their problem</span>${esc(a.pain_point)}</div></div>
+            </div>
+            <div class="ang-hooks"><span>🎬 Opening lines</span>${a.hooks.map(h => `<p><b>▶</b>${esc(h)}</p>`).join('')}</div>
+            <div class="ang-types">${a.creative_types.map(c => `<span>${esc(c)}</span>`).join('')}</div>
+            ${a.why ? `<details class="ang-why"><summary>💡 Why it could work</summary><p>${esc(a.why)}</p></details>` : ''}
+          </div>
+          <footer class="ang-actions">
             <button class="btn sm" data-aedit="${a.id}">✏️ Edit</button>
             <button class="btn sm" data-aregen="${a.id}" ${busy || allJob ? 'disabled' : ''}>${busy ? '<span class="spin sm"></span> Rewriting…' : '↻ Regenerate'}</button>
-            <button class="btn sm ghost danger" data-adel="${a.id}">🗑</button>
-          </div>
+            <button class="btn sm ghost danger" data-adel="${a.id}" title="Delete">🗑</button>
+            <span class="ang-pick">${sel.has(a.id) ? '✓ Selected' : 'Click to select'}</span>
+          </footer>
         </article>`;
       }).join('')}
       ${allJob && !s.angles.length ? Array(6).fill('<article class="angle skeleton"><i></i><i></i><i></i><i></i></article>').join('') : ''}
