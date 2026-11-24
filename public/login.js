@@ -64,7 +64,6 @@
       b.style.width = idx < cur ? '100%' : idx > cur ? '0%' : `${(pos / inPart.length) * 100}%`;
     });
     screen.className = `screen scene-${g.part} shot-${ad % 4}`;
-    $('scTag').textContent = g.part.toUpperCase();
     $('scCod').classList.toggle('hidden', g.part !== 'cta');
     $('scArrows').classList.toggle('hidden', g.part !== 'cta');
     const cap = $('scCap');

@@ -142,3 +142,11 @@ export async function callJson({ kind, system, content, schema, productId = null
   }
   throw new HttpError(502, `The AI answer was not in the right form (${lastError}). Try again.`);
 }
+
+// A whole script → { hook, body, cta }: the first sentence opens the video, the last one ends it, the rest is the middle.
+// (Videos are always built in these three parts; the team only writes one text.)
+export function splitScript(text) {
+  const sentences = String(text || '').replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+["'”»]?|[^.!?…]+$/g)?.map(x => x.trim()).filter(Boolean) || [];
+  if (sentences.length < 3) return { hook: sentences[0] || '', body: sentences[1] || '', cta: sentences[2] || '' };
+  return { hook: sentences[0], body: sentences.slice(1, -1).join(' '), cta: sentences[sentences.length - 1] };
+}

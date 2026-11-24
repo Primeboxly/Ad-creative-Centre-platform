@@ -9,7 +9,7 @@ import { HttpError } from './errors.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { probe, thumbnail, thumbOf, queueRenders, resumeRenders, removeFile, captionsReady, extractAudio } from './video.js';
 import { ttsReady, listVoices, composeMusic } from './tts.js';
-import { writeScripts, LANGUAGES, aiReady, aiMock } from './ai.js';
+import { writeScripts, LANGUAGES, aiReady, aiMock, splitScript } from './ai.js';
 import { safeGet, extractProduct } from './fetchpage.js';
 import { setMarkets, strategyState, startAnalysis, startAngles, startOneAngle, addCustomAngle, updateAngle, saveSelection, aiReadPage } from './strategy.js';
 import { queueSplits, resumeSplits, rawName } from './split.js';
@@ -558,9 +558,11 @@ app.post('/api/products/:id/scripts/generate', h(async (req, res) => {
 
 app.post('/api/products/:id/scripts', (req, res) => {
   const p = productOr404(idParam(req.params.id));
-  const s = req.body || {};
+  const s = { ...(req.body || {}) };
   if (!LANGUAGES[s.language]) throw new HttpError(400, 'Unknown language');
-  if (!str(s.hook) || !str(s.body) || !str(s.cta)) throw new HttpError(400, 'Hook, body and CTA are required');
+  // One written script: the platform splits it into the opening, the middle and the ending of the video.
+  if (s.script !== undefined) Object.assign(s, splitScript(str(s.script, 6000)));
+  if (!str(s.hook) || !str(s.body) || !str(s.cta)) throw new HttpError(400, 'Write a script of at least 3 sentences');
   res.status(201).json({ id: insertScript(p.id, req.user.id, s.language, s) });
 });
 
