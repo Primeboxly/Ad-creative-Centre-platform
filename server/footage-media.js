@@ -97,6 +97,7 @@ export async function makeSilentCopy(src, out, info, ext, size, ctx) {
 const FFPROBE = process.env.FFPROBE_PATH || (existsSync('/usr/bin/ffprobe') ? '/usr/bin/ffprobe'
   : await import('ffprobe-static').then(m => m.default?.path || '').catch(() => ''));
 export const ffprobeReady = () => Boolean(FFPROBE);
+export const ffprobePath = () => FFPROBE;
 
 // How many audio and video streams a file has, read by ffprobe.
 export function streamCounts(file, ctx) {

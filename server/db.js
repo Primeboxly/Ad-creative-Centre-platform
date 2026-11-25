@@ -389,3 +389,94 @@ CREATE TABLE IF NOT EXISTS sb_approvals (
 );`);
 // A restart stops generation: running work goes back to the queue.
 db.exec(`UPDATE sb_jobs SET status = 'queued' WHERE status = 'running';`);
+
+// ---------- Module 5: AI voice-over & background music (new tables only) ----------
+db.exec(`
+CREATE TABLE IF NOT EXISTS el_cache (key TEXT PRIMARY KEY, data TEXT NOT NULL, fetched_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- Voices of the connected ElevenLabs account (refreshed on request; available = still on the account).
+CREATE TABLE IF NOT EXISTS el_voices (
+  voice_id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+  labels TEXT NOT NULL DEFAULT '{}', languages TEXT NOT NULL DEFAULT '[]', preview_url TEXT NOT NULL DEFAULT '', preview_key TEXT NOT NULL DEFAULT '',
+  models TEXT NOT NULL DEFAULT '[]', available INTEGER NOT NULL DEFAULT 1, fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS voice_favorites (voice_id TEXT PRIMARY KEY REFERENCES el_voices(voice_id) ON DELETE CASCADE, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- Preferred voice for a market (country:language) or a creative type.
+CREATE TABLE IF NOT EXISTS voice_preferences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL CHECK (scope IN ('market','type')), scope_key TEXT NOT NULL,
+  voice_id TEXT NOT NULL REFERENCES el_voices(voice_id) ON DELETE CASCADE, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (scope, scope_key)
+);
+CREATE TABLE IF NOT EXISTS voice_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, voice_id TEXT NOT NULL, model_id TEXT NOT NULL DEFAULT '', settings TEXT NOT NULL DEFAULT '{}',
+  market TEXT NOT NULL DEFAULT '', creative_type TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- How to say a word: alias (text replacement) or phoneme (ElevenLabs pronunciation dictionary). product_id NULL = everywhere.
+CREATE TABLE IF NOT EXISTS pronunciation_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE CASCADE, language TEXT NOT NULL DEFAULT '',
+  term TEXT NOT NULL, spoken TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'alias' CHECK (type IN ('alias','phoneme')), alphabet TEXT NOT NULL DEFAULT 'ipa',
+  case_sensitive INTEGER NOT NULL DEFAULT 0, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Music library (AI generated or uploaded; reused across creatives).
+CREATE TABLE IF NOT EXISTS music_assets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('ai','upload')),
+  prompt TEXT NOT NULL DEFAULT '', duration REAL NOT NULL DEFAULT 0, mood TEXT NOT NULL DEFAULT '', energy INTEGER NOT NULL DEFAULT 0, style TEXT NOT NULL DEFAULT '',
+  tempo INTEGER, storage_key TEXT NOT NULL, format TEXT NOT NULL DEFAULT '', sample_rate INTEGER NOT NULL DEFAULT 0, sha256 TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '{}', license TEXT NOT NULL DEFAULT '{}', favorite INTEGER NOT NULL DEFAULT 0, cache_key TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- One audio production per approved script and storyboard version (Module 4).
+CREATE TABLE IF NOT EXISTS au_productions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  sb_plan_id INTEGER NOT NULL REFERENCES sb_plans(id) ON DELETE CASCADE, sb_version_id INTEGER NOT NULL REFERENCES sb_versions(id) ON DELETE CASCADE,
+  brief_id INTEGER NOT NULL REFERENCES creative_briefs(id) ON DELETE CASCADE, variation_index INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'draft', error TEXT NOT NULL DEFAULT '', approved_version_id INTEGER,
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (sb_version_id)
+);
+-- Generated voice-overs (never changed; a regeneration makes a new one). Alignment and timings are stored with it.
+CREATE TABLE IF NOT EXISTS au_voiceovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, production_id INTEGER NOT NULL REFERENCES au_productions(id) ON DELETE CASCADE, parent_id INTEGER,
+  sb_version_id INTEGER NOT NULL, script_hash TEXT NOT NULL, voice_id TEXT NOT NULL, voice_name TEXT NOT NULL DEFAULT '', model_id TEXT NOT NULL,
+  settings TEXT NOT NULL DEFAULT '{}', language TEXT NOT NULL DEFAULT '', speech TEXT NOT NULL DEFAULT '{}',
+  storage_key TEXT NOT NULL, duration REAL NOT NULL DEFAULT 0, sample_rate INTEGER NOT NULL DEFAULT 0, format TEXT NOT NULL DEFAULT '',
+  alignment TEXT NOT NULL DEFAULT '', words TEXT NOT NULL DEFAULT '[]', sentences TEXT NOT NULL DEFAULT '[]', alignment_source TEXT NOT NULL DEFAULT 'estimated',
+  characters INTEGER NOT NULL DEFAULT 0, request_ids TEXT NOT NULL DEFAULT '[]', cache_key TEXT NOT NULL DEFAULT '', loudness TEXT NOT NULL DEFAULT '{}',
+  peaks TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_auvo_cache ON au_voiceovers(cache_key);
+-- Actual timing of every script segment in a voice-over.
+CREATE TABLE IF NOT EXISTS au_voice_segments (
+  voiceover_id INTEGER NOT NULL REFERENCES au_voiceovers(id) ON DELETE CASCADE, segment_id TEXT NOT NULL, ord INTEGER NOT NULL,
+  start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, speech_text TEXT NOT NULL, regenerated INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (voiceover_id, segment_id)
+);
+-- Versions of an audio production: plan, voice choice, voice-over, music, mix, synchronized storyboard, checks.
+CREATE TABLE IF NOT EXISTS au_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, production_id INTEGER NOT NULL REFERENCES au_productions(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL, parent_id INTEGER, label TEXT NOT NULL DEFAULT '', frozen INTEGER NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
+  plan TEXT NOT NULL DEFAULT '', voice TEXT NOT NULL DEFAULT '', voiceover_id INTEGER REFERENCES au_voiceovers(id) ON DELETE SET NULL,
+  music TEXT NOT NULL DEFAULT '', mix TEXT NOT NULL DEFAULT '', sync TEXT NOT NULL DEFAULT '', validation TEXT NOT NULL DEFAULT '',
+  accept TEXT NOT NULL DEFAULT '{}', locked TEXT NOT NULL DEFAULT '{}',
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (production_id, number)
+);
+CREATE TABLE IF NOT EXISTS au_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, production_id INTEGER NOT NULL REFERENCES au_productions(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', options TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
+  stage TEXT NOT NULL DEFAULT '', progress REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+  error TEXT NOT NULL DEFAULT '', failed_stage TEXT NOT NULL DEFAULT '', log TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_auj_status ON au_jobs(status, id);
+CREATE TABLE IF NOT EXISTS au_approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, production_id INTEGER NOT NULL REFERENCES au_productions(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES au_versions(id) ON DELETE CASCADE, package TEXT NOT NULL,
+  approved_by INTEGER REFERENCES users(id), approved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Every ElevenLabs call: characters (speech) or seconds (music), the cost header when the provider gives one.
+CREATE TABLE IF NOT EXISTS audio_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, kind TEXT NOT NULL, characters INTEGER NOT NULL DEFAULT 0, seconds REAL NOT NULL DEFAULT 0,
+  provider_cost REAL, request_id TEXT NOT NULL DEFAULT '', production_id INTEGER, user_id INTEGER, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+db.exec(`UPDATE au_jobs SET status = 'queued' WHERE status = 'running';`);

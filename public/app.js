@@ -912,7 +912,7 @@ async function renderHub(kind) {
 }
 
 // ---------- Creative projects (Module 3): list, new project, 6-step workflow, Creative Brief ----------
-const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝']];
+const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝'], ['audio', 'Audio studio', '🎙']];
 const CP_STATUS = { draft: '📝 Draft', ready: '✅ Brief saved' };
 const AIR = 'ai_recommended';
 let REG = null;
@@ -1019,7 +1019,7 @@ function drawProject(keepScroll = false) {
   const y = window.scrollY, active = document.activeElement?.id;
   const errs = st.validation.errors, warns = st.validation.warnings;
   const stepIssues = k => errs.filter(e => e.step === k).length;
-  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false };
+  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false, audio: false };
   v.innerHTML = `
     <a class="back" href="#projects">← Creative projects</a>
     <section class="ag-hero cp-hero">
@@ -1046,7 +1046,7 @@ function drawProject(keepScroll = false) {
     <div class="cp-nav">
       ${state.cpStep !== 'product' ? '<button class="btn" id="cpPrev">← Back</button>' : '<span></span>'}
       <span class="muted small">${errs.length ? `⛔ ${errs.length} blocking · ` : ''}${warns.length ? `⚠ ${warns.length} warning${warns.length > 1 ? 's' : ''}` : errs.length ? '' : '✓ Ready'}</span>
-      ${state.cpStep === 'script' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
+      ${state.cpStep === 'audio' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
     </div>`;
   const go = async k => { await cpFlush(); state.cpStep = k; location.hash = `project/${st.project.id}/${k}`; };
   v.querySelectorAll('[data-cpstep]').forEach(b => b.onclick = () => go(b.dataset.cpstep));
@@ -1062,7 +1062,8 @@ function drawProject(keepScroll = false) {
     if (!confirm(`Delete the project "${st.project.name}" and its saved briefs? Products and footage are not touched.`)) return;
     try { await api(`/api/creative-projects/${st.project.id}`, { method: 'DELETE' }); toast('Project deleted'); location.hash = 'projects'; refreshSide(); } catch (e) { fail(e); }
   });
-  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript })[state.cpStep]();
+  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript, audio: cpAudio })[state.cpStep]();
+  const onStep = v.querySelector('.sstep.on'); if (onStep) onStep.parentElement.scrollLeft = Math.max(0, onStep.offsetLeft - 60);
   if (!st.can_edit) $('#cpBody').querySelectorAll('input, select, textarea, button:not([data-view])').forEach(x => { x.disabled = true; });
   if (keepScroll) { window.scrollTo(0, y); if (active) { const el = document.getElementById(active); if (el && el.type !== 'checkbox') { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } } }
 }
@@ -1714,6 +1715,346 @@ function sbJson(title, obj) {
   m.innerHTML = `<div class="modal-card" style="width:min(900px,100%)"><div class="sec-h"><div><h2>${esc(title)}</h2></div><button class="btn sm" data-x>Close</button></div><pre class="cp-json">${esc(JSON.stringify(obj, null, 2))}</pre></div>`;
   m.onclick = e => { if (e.target === m || e.target.dataset.x !== undefined) m.remove(); };
   document.body.appendChild(m);
+}
+
+// ---------- Module 5: Audio studio (AI voice-over & background music) ----------
+const AU_STATUS = { draft: 'Draft', preparing_plan: 'Preparing audio plan…', selecting_voice: 'Selecting voice…', generating_voiceover: 'Generating voice-over…', analyzing_timing: 'Analyzing voice-over timing…',
+  validating_duration: 'Validating duration…', preparing_music: 'Preparing music…', generating_music: 'Generating music…', mixing_audio: 'Mixing audio…', synchronizing_storyboard: 'Synchronizing storyboard…',
+  ready: 'Ready for review', approved: 'Approved', failed: 'Failed', cancelled: 'Cancelled' };
+const AU_STAGE = { plan: 'audio plan', voice: 'voice selection', voiceover: 'voice-over', duration: 'duration check', music: 'music', mix: 'mixing', sync: 'storyboard sync', segment: 'segment' };
+const auBusy = a => ['queued', 'running'].includes(a?.job?.status);
+const auAct = fn => sbAct(fn);
+const auFmt = s => (s == null ? '—' : `${Number(s).toFixed(1)} s`);
+
+async function cpAudio() {
+  const st = state.cp, body = $('#cpBody');
+  body.innerHTML = '<div class="card"><p class="muted">Loading the audio studio…</p></div>';
+  const [cfg, list] = await Promise.all([api('/api/audio/config').catch(() => ({ ready: false })), api(`/api/creative-projects/${st.project.id}/audio`).catch(fail)]);
+  if (!list) return;
+  state.auCfg = cfg; state.auPlans = list.plans;
+  if (!list.plans.length) {
+    body.innerHTML = `<div class="card s-empty"><div class="s-empty-ic">🎙</div><h2>Approve a script first</h2><p class="muted">The voice-over and music are made from an approved script & storyboard (step 7).</p><button class="btn primary big" id="auToScript">Go to Script & storyboard</button></div>`;
+    $('#auToScript').onclick = () => { location.hash = `project/${st.project.id}/script`; };
+    return;
+  }
+  if (!list.plans.some(p => p.sb_plan_id === state.auPlan)) state.auPlan = list.plans[0].sb_plan_id;
+  const plan = list.plans.find(p => p.sb_plan_id === state.auPlan);
+  state.au = plan.production_id ? await api(`/api/audio-productions/${plan.production_id}`).catch(fail) : null;
+  auDraw();
+}
+async function auReload() { if (state.au) state.au = await api(`/api/audio-productions/${state.au.production.id}`); auDraw(); }
+function auPoll() {
+  clearTimeout(state.auTimer);
+  const id = state.au?.production.id;
+  state.auTimer = setTimeout(async () => {
+    if (state.cpStep !== 'audio' || state.au?.production.id !== id) return;
+    try { state.au = await api(`/api/audio-productions/${id}`); } catch { return; }
+    auDraw();
+  }, 1500);
+}
+const auPatch = body => auAct(async () => { state.au = await api(`/api/audio-productions/${state.au.production.id}`, { method: 'PATCH', body }); auDraw(); });
+const auJob = (kind, target = '', extra = {}) => auAct(async () => { await api(`/api/audio-productions/${state.au.production.id}/jobs`, { method: 'POST', body: { kind, target, ...extra } }); await auReload(); });
+
+function auDraw() {
+  const y = window.scrollY;
+  const st = state.cp, a = state.au, cfg = state.auCfg, plans = state.auPlans;
+  const plan = plans.find(p => p.sb_plan_id === state.auPlan);
+  const busy = auBusy(a), edit = st.can_edit && !busy && !a?.production.outdated;
+  const head = `
+    <section class="card sb-head">
+      <div class="sb-head-row">
+        <label>Approved script <select id="auPlan">${plans.map(p => `<option value="${p.sb_plan_id}" ${p.sb_plan_id === state.auPlan ? 'selected' : ''}>Video ${p.variation_index} · script v${p.sb_version_number} · brief v${p.brief_version}${p.production_id ? ' · audio started' : ''}</option>`).join('')}</select></label>
+        ${a ? `<span class="pst ${a.production.status === 'approved' ? 'st-scaling' : a.production.status === 'failed' ? 'st-paused' : 'st-idea'}">${AU_STATUS[a.production.status] || a.production.status}</span>` : ''}
+      </div>
+      ${!cfg.ready ? '<div class="cp-warn">⚠ ElevenLabs is not connected: an admin adds <b>ELEVENLABS_API_KEY</b> in the server settings (Railway → Variables). Nothing is generated until then.</div>' : ''}
+      ${a?.production.outdated ? `<div class="cp-err">⛔ The script was changed and approved again since this audio was made. This audio stays for the old script: choose the newest script above to make its audio.</div>` : ''}
+      ${busy ? `<div class="sb-progress"><div class="ai-orb"><span></span><span></span><span></span></div><div><b>${AU_STATUS[a.production.status] || 'Working…'}</b><div class="fv-bar"><i style="width:${Math.max(5, Math.round((a.job.progress || 0) * 100))}%"></i></div></div><button class="btn sm" id="auCancel">⏹ Cancel</button></div>` : ''}
+      ${a?.job?.status === 'failed' ? `<div class="cp-err">⛔ ${a.job.failed_stage ? `Stopped at the ${esc(AU_STAGE[a.job.failed_stage] || a.job.failed_stage)}: ` : ''}${esc(a.job.error)} <a id="auRetry">↻ Retry ${a.job.failed_stage ? 'from there' : ''}</a></div>` : ''}
+      <div class="sb-head-row">
+        ${!a?.voiceover && !a?.mix?.key ? `<button class="btn primary big" id="auGen" ${st.can_edit && !busy && cfg.ready ? '' : 'disabled'}>🎙 Generate Voiceover & Music</button><span class="small muted">One click: audio plan → voice → voice-over → real timing → duration check → music → mix → storyboard sync → checks.</span>`
+          : `<button class="btn" id="auGenAll" ${edit && cfg.ready ? '' : 'disabled'} title="Run everything again (locked voice-over or music is kept; same text, voice and settings reuse the saved file)">↻ Run all again</button>`}
+        ${a ? `<span class="small muted sb-cost">ElevenLabs: ${a.usage.characters} characters${a.usage.music_seconds ? ` · ${a.usage.music_seconds} s music` : ''} · ${a.usage.calls} call${a.usage.calls === 1 ? '' : 's'} · AI ${a.usage.ai_usd.toFixed(3)}</span>` : ''}
+      </div>
+    </section>`;
+  if (!a || (!a.plan && !a.voiceover)) {
+    $('#cpBody').innerHTML = head + `<div class="card s-empty"><div class="s-empty-ic">🎧</div><h2>No audio yet for video ${plan.variation_index}</h2><p class="muted">The AI Audio Director reads the approved script v${plan.sb_version_number}, picks a voice from your ElevenLabs account, makes the voice-over, chooses or generates background music, mixes it and fits the storyboard to the real speech.</p></div>`;
+    auWire();
+    if (busy) auPoll();
+    return;
+  }
+  const c = a.context || {}, vo = a.voiceover, du = a.duration, val = a.validation || { errors: [], warnings: [] }, v = a.voice || {}, m = a.music || {}, mx = a.mix, sy = a.sync;
+  const media = (what, extra = '') => `/api/audio-productions/${a.production.id}/media/${what}${extra}`;
+  const ranges = cfg.ranges || { stability: [0, 1], similarity_boost: [0, 1], style: [0, 1], speed: [0.7, 1.2] };
+  const set = v.settings || {};
+  const slider = (k, l, help) => set[k] === undefined ? '' : `<label class="au-sl"><span>${l} <b data-slv="${k}">${Number(set[k]).toFixed(2)}</b></span><input type="range" data-set="${k}" min="${ranges[k][0]}" max="${ranges[k][1]}" step="0.05" value="${set[k]}" ${edit ? '' : 'disabled'}><small class="muted">${help}</small></label>`;
+  const durCls = du ? (du.case === 'fits' ? 'ok' : du.case === 'slightly_long' ? 'warn' : 'bad') : '';
+  $('#cpBody').innerHTML = head + `
+    <section class="card"><div class="sec-h"><div><h2>📋 Audio summary</h2><small>Script v${c.script_version} · audio version v${a.version?.number}${a.version?.approved ? ' (approved)' : a.version?.frozen ? ' (frozen)' : ' (draft)'}</small></div></div>
+      <div class="insp-facts">${[['Product', c.product], ['Marketing angle', (c.angles || []).join(' + ')], ['Creative type', c.creative_type], ['Language', `${c.language || ''}${c.dialect ? ` (${c.dialect})` : ''}`], ['Market', c.country || '—'],
+        ['Target duration', `${c.duration} s`], ['Voice', v.name ? `${v.name} · ${v.model_name || v.model_id}` : '—'], ['Music', m.mode === 'none' ? 'None' : m.name || (m.fallback ? 'None (fallback)' : '—')],
+        ['Voice-over', vo ? `${vo.duration.toFixed(1)} s (estimated script ${c.estimated_seconds} s)` : '—'], ['Final video', sy ? `${sy.final_duration} s` : du ? `${du.final} s` : '—'], ['Status', AU_STATUS[a.production.status] || a.production.status]].map(([k, x]) => `<div><span>${k}</span><p>${esc(x)}</p></div>`).join('')}</div>
+      ${a.plan ? `<p class="small muted">🎬 ${esc(a.plan.summary)}</p>` : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎙 Voice-over</h2><small>${v.name ? `${esc(v.name)} · chosen by ${esc(v.source || 'the team')} · ${esc(v.fit?.level || '')} for ${esc(c.language || '')}${v.fit?.accents?.length ? ` · accent ${esc(v.fit.accents.join(', '))}` : ''}` : 'No voice yet'}</small></div>
+      <div class="row"><button class="btn sm" id="auVoices" ${edit ? '' : 'disabled'}>🗣 Choose voice</button>${v.mode === 'manual' ? `<button class="btn sm" id="auVoiceAuto" ${edit ? '' : 'disabled'}>✨ Let the AI choose</button>` : ''}<button class="btn sm" data-aujob="voice" ${edit && cfg.ready ? '' : 'disabled'}>↻ Regenerate voice-over</button>
+      <label class="fs-tg"><input type="checkbox" id="auLockVo" ${a.locked?.voiceover ? 'checked' : ''} ${edit ? '' : 'disabled'}> 🔒 Lock</label></div></div>
+      ${(v.limitations || []).map(l => `<div class="cp-warn">⚠ ${esc(l)}</div>`).join('')}
+      ${vo ? `<div class="au-player"><audio id="auVo" controls preload="metadata" src="${media('voiceover', `?vo=${vo.id}`)}"></audio><a class="btn sm" href="${media('voiceover', `?vo=${vo.id}&download=1`)}">⬇ Download</a></div>
+        <div class="sb-stats"><span>🎙 ${vo.duration.toFixed(1)} s spoken</span><span>🎯 ${c.duration} s target</span>${du ? `<span class="${durCls}">${du.diff > 0 ? '+' : ''}${du.diff} s</span>` : ''}<span>⏱ timing: ${vo.alignment_source === 'provider' ? 'exact (ElevenLabs)' : vo.alignment_source === 'estimated' ? '<b class="bad">estimated</b>' : 'mapped'}</span><span class="muted">${vo.characters} characters</span></div>
+        ${du ? `<div class="${du.case === 'fits' ? 'cp-ok' : du.case === 'slightly_long' ? 'cp-warn' : 'cp-err'}">${esc(du.action)}${du.case === 'slightly_long' && du.speed ? ` <a data-speed="${du.speed}">Regenerate at speed ${du.speed}</a>` : ''}${du.case !== 'fits' ? ` <label class="fs-tg"><input type="checkbox" id="auAccLong" ${a.accept?.long_duration ? 'checked' : ''} ${edit ? '' : 'disabled'}> Accept a ${du.final} s video</label>` : ''}</div>` : ''}
+        ${vo.alignment_source === 'estimated' ? `<div class="cp-warn">⚠ ElevenLabs gave no timing for this take, so word and segment times are estimated. <label class="fs-tg"><input type="checkbox" id="auAccEst" ${a.accept?.estimated_timing ? 'checked' : ''} ${edit ? '' : 'disabled'}> I checked it: accept estimated timing</label></div>` : ''}
+        ${v.shorter?.segments ? `<div class="cp-warn">✂️ Shorter script proposed (${esc(v.shorter.status)}): ${esc(v.shorter.note)}<div class="au-short">${v.shorter.segments.map(s => `<p><b>${esc(s.id)}</b> ${esc(s.text)}</p>`).join('')}</div>${v.shorter.status === 'proposed' ? `<button class="btn sm primary" id="auShortAcc" ${edit ? '' : 'disabled'}>Send to step 7 as a new draft</button>` : ''}</div>` : ''}
+        <div class="au-segs">${vo.segments.map(s => `<div class="au-seg ${s.regenerated ? 'regen' : ''}"><div class="au-seg-t"><b>${esc(SB_ROLES[c.segments?.find(x => x.id === s.segment_id)?.role] || s.segment_id)}</b><span class="small muted">${fmtT(s.start)}–${fmtT(s.end)} · ${(s.end - s.start).toFixed(1)} s</span></div>
+          <p>${esc(s.text)}</p>${s.speech_text !== s.text ? `<p class="small muted">🔊 Said as: ${esc(s.speech_text)}</p>` : ''}
+          <div class="row"><button class="icon-btn sm" data-play="${s.start}:${s.end}" title="Play this segment">▶</button><button class="icon-btn sm" data-segregen="${esc(s.segment_id)}" title="Regenerate only this segment" ${edit && cfg.ready ? '' : 'disabled'}>↻</button></div></div>`).join('')}</div>
+        ${a.voiceovers.length > 1 ? `<details class="au-more"><summary>Previous takes (${a.voiceovers.length})</summary>${a.voiceovers.map(x => `<div class="au-take ${x.id === vo.id ? 'on' : ''}"><span>#${x.id} · ${esc(x.voice_name)} · ${x.duration.toFixed(1)} s · ${esc(x.alignment_source)}${x.note ? ` · ${esc(x.note)}` : ''} · ${ago(x.created_at)}</span><audio controls preload="none" src="${media('voiceover', `?vo=${x.id}`)}"></audio>${x.id === vo.id ? '<b class="ok-t">In use</b>' : `<button class="btn sm" data-usevo="${x.id}" ${edit ? '' : 'disabled'}>Use this take</button>`}</div>`).join('')}</details>` : ''}`
+        : '<p class="muted">No voice-over yet.</p>'}
+      <details class="au-more" ${state.auOpenSet ? 'open' : ''} id="auSetBox"><summary>⚙️ Voice settings (${esc(v.settings_source || 'recommended')}) · model ${esc(v.model_id || '—')}</summary>
+        <div class="au-sliders">${slider('stability', 'Stability', 'Lower = more expressive, higher = steadier')}${slider('similarity_boost', 'Similarity', 'How close to the original voice')}${slider('style', 'Style', 'Extra expressiveness (0 is safest)')}${slider('speed', 'Speed', '1 = normal; stays in a natural range')}
+          ${set.use_speaker_boost !== undefined ? `<label class="fs-tg"><input type="checkbox" data-set="use_speaker_boost" ${set.use_speaker_boost ? 'checked' : ''} ${edit ? '' : 'disabled'}> Speaker boost</label>` : ''}
+          <label>Model <select id="auModel" ${edit ? '' : 'disabled'}><option value="">Automatic (best for ${esc(c.language || 'the language')})</option>${(cfg.models || []).map(x => `<option value="${x.model_id}" ${v.model_wanted === x.model_id ? 'selected' : ''}>${esc(x.name)}${x.languages.length ? ` · ${x.languages.length} languages` : ''}</option>`).join('')}</select></label>
+          <label class="fs-tg"><input type="checkbox" id="auAutoSpeed" ${v.auto_speed !== false ? 'checked' : ''} ${edit ? '' : 'disabled'}> Speed up a little automatically when slightly too long</label></div>
+        <div class="row"><button class="btn sm primary" id="auSetSave" ${edit ? '' : 'disabled'}>Save & regenerate</button><button class="btn sm" id="auSetReset" ${edit ? '' : 'disabled'}>Reset to recommended</button><button class="btn sm" id="auPreset" ${v.voice_id ? '' : 'disabled'}>💾 Save as preset</button></div>
+      </details>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎵 Background music</h2><small>${a.plan ? `${esc(a.plan.music.mood)} · ${esc(a.plan.music.style)} · energy ${a.plan.music.energy}/5 · ~${a.plan.music.tempo_bpm} BPM` : ''}</small></div>
+      <div class="row"><label class="fs-tg"><input type="checkbox" id="auLockMu" ${a.locked?.music ? 'checked' : ''} ${edit ? '' : 'disabled'}> 🔒 Lock</label></div></div>
+      <div class="chip-pick" id="auMode">${[['ai', '✨ AI music'], ['library', '📚 Library'], ['upload', '⬆ Upload'], ['none', '🔇 No music']].map(([k, l]) => `<button data-mode="${k}" class="${(m.mode || 'ai') === k ? 'on' : ''}" ${edit ? '' : 'disabled'}>${l}</button>`).join('')}</div>
+      ${m.fallback ? `<div class="cp-warn">⚠ ${esc(m.fallback)}</div>` : ''}
+      ${a.music_asset ? `<div class="au-track"><div><b>${esc(a.music_asset.name)}</b><span class="small muted"> · ${a.music_asset.source === 'ai' ? 'AI generated (ElevenLabs Music)' : 'Uploaded'} · ${a.music_asset.duration.toFixed(0)} s original · ${esc(a.music_asset.license?.note || a.music_asset.license?.source || '')}</span></div>
+        ${m.processed_key ? `<div class="au-player"><audio controls preload="none" src="${media('music')}"></audio><a class="btn sm" href="${media('music', '?download=1')}">⬇</a></div><p class="small muted">Prepared for ${m.prepared_for} s: ${m.processing?.loop ? 'looped' : 'trimmed'} from ${m.processing?.start || 0} s, fade in ${m.processing?.fade_in} s, fade out ${m.processing?.fade_out} s. The original file is kept.</p>` : ''}
+        <div class="au-trim"><label>Start at (s) <input type="number" id="auMStart" min="0" step="0.5" value="${m.start || 0}" ${edit ? '' : 'disabled'}></label><label>Fade in (s) <input type="number" id="auMIn" min="0" max="10" step="0.1" value="${m.fade_in ?? cfg.mix_defaults?.fade_in ?? 0.6}" ${edit ? '' : 'disabled'}></label><label>Fade out (s) <input type="number" id="auMOut" min="0" max="10" step="0.1" value="${m.fade_out ?? cfg.mix_defaults?.fade_out ?? 1.2}" ${edit ? '' : 'disabled'}></label><button class="btn sm" id="auMApply" ${edit ? '' : 'disabled'}>Apply</button></div></div>` : ''}
+      <div class="row">${(m.mode || 'ai') === 'ai' ? `<button class="btn sm" data-aujob="music" data-force="1" ${edit && cfg.ready ? '' : 'disabled'}>↻ New AI music</button>` : ''}<button class="btn sm" id="auLib" ${edit ? '' : 'disabled'}>📚 Music library</button><button class="btn sm" id="auUp" ${edit ? '' : 'disabled'}>⬆ Upload music</button></div>
+      ${a.plan?.music.prompt ? `<p class="small muted">Prompt: ${esc(a.plan.music.prompt)}</p>` : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎚 Final mix</h2><small>${mx?.measured?.mix ? `${mx.measured.mix.i} LUFS · peak ${mx.measured.mix.tp} dBTP · voice ${mx.gains.voice_db > 0 ? '+' : ''}${mx.gains.voice_db} dB · music ${mx.gains.music_db} dB${mx.config.ducking ? ' · ducking on' : ''}` : 'Not mixed yet'}</small></div>
+      <div class="row"><button class="btn sm" data-aujob="mix" ${edit ? '' : 'disabled'}>↻ Mix again</button></div></div>
+      ${mx?.stale ? '<div class="cp-warn">⚠ Voice, music or settings changed: mix again.</div>' : ''}
+      ${mx?.key ? `<div class="au-player"><audio controls preload="metadata" src="${media('mix')}"></audio><a class="btn sm" href="${media('mix', '?download=1')}">⬇ Download mix</a></div><p class="small muted">Voice, music and mix are kept as separate files. The footage's own sound is never used.</p>` : ''}
+      <details class="au-more"><summary>⚙️ Advanced mixing</summary>
+        <div class="au-trim">${[['music_rel_db', 'Music under voice (dB)', -30, 0, 1], ['voice_gain_db', 'Voice extra gain (dB)', -6, 6, 0.5], ['music_gain_db', 'Music extra gain (dB)', -12, 6, 0.5], ['final_lufs', 'Final loudness (LUFS)', -20, -10, 0.5], ['lead_in', 'Silence before voice (s)', 0, 2, 0.05]].map(([k, l, lo, hi, step]) => `<label>${l} <input type="number" data-mixk="${k}" min="${lo}" max="${hi}" step="${step}" value="${mx?.config?.[k] ?? cfg.mix_defaults?.[k] ?? ''}" ${edit ? '' : 'disabled'}></label>`).join('')}
+          <label class="fs-tg"><input type="checkbox" id="auDuck" ${(mx?.config?.ducking ?? true) ? 'checked' : ''} ${edit ? '' : 'disabled'}> Lower the music while the voice speaks</label></div>
+        <div class="row"><button class="btn sm primary" id="auMixSave" ${edit ? '' : 'disabled'}>Save & mix</button><button class="btn sm" id="auMixReset" ${edit ? '' : 'disabled'}>Reset</button></div>
+        ${mx?.measured ? `<p class="small muted">Measured: voice ${mx.measured.voice?.i ?? '—'} LUFS · music ${mx.measured.music?.i ?? '—'} LUFS · mix ${mx.measured.mix?.i} LUFS, range ${mx.measured.mix?.lra} LU.</p>` : ''}
+      </details>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎞 Storyboard on the real speech</h2><small>${sy ? `${sy.shots.length} shots · ${sy.final_duration} s · ${sy.source === 'voiceover' ? 'from the voice-over timing' : 'estimated timing'}` : 'Not synchronized yet'}</small></div>
+      <div class="row"><button class="btn sm" data-aujob="sync" ${edit ? '' : 'disabled'}>↻ Synchronize again</button>${sy?.review.length ? `<button class="btn sm primary" id="auSyncOk" ${edit ? '' : 'disabled'}>✓ I reviewed the changes</button>` : ''}</div></div>
+      ${sy?.stale ? '<div class="cp-warn">⚠ The voice-over changed: synchronize again.</div>' : ''}
+      ${sy ? `<div class="au-sync">${sy.segments.map(w => { const seg = c.segments?.find(x => x.id === w.id); const shots = sy.shots.filter(s => s.segment_id === w.id); return `<div class="au-win"><div class="au-win-h"><b>${esc(SB_ROLES[w.role] || w.role)}</b><span class="small muted">planned ${fmtT(w.est_start)}–${fmtT(w.est_end)} → real ${fmtT(w.start)}–${fmtT(w.end)}</span></div>
+          <p class="small">${esc(seg?.text || '')}</p>
+          <div class="au-shots">${shots.map(s => `<div class="au-shot ${s.needs_review ? 'review' : ''}"><img src="/media/scene/${s.scene_id}/thumb" alt=""><span>${s.old_duration.toFixed(1)} → <b>${s.duration.toFixed(1)} s</b></span>${s.needs_review ? '<i>review</i>' : ''}${s.warnings.length ? `<small class="bad">${esc(s.warnings.join(' · '))}</small>` : ''}</div>`).join('')}</div></div>`; }).join('')}</div>
+        ${sy.proposals.length ? `<div class="cp-warn">💡 Proposals (nothing is changed without you): ${sy.proposals.map(p => esc(`shot ${p.shot_id}: ${p.note}`)).join(' · ')}</div>` : ''}` : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🔎 Checks</h2><small>${val.errors.length ? `${val.errors.length} blocking` : 'Nothing blocking'} · ${val.warnings.length} warning${val.warnings.length === 1 ? '' : 's'}</small></div><button class="btn sm" id="auCheck">Check again</button></div>
+      ${val.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('')}${val.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}</div>`).join('')}${!val.errors.length && !val.warnings.length ? '<div class="cp-ok">✓ Everything checks out.</div>' : ''}
+    </section>
+
+    <details class="card sb-sec" id="auPronBox" ${state.auOpenPron ? 'open' : ''}><summary><h2>🔤 Pronunciation</h2> <small class="muted">How brand names and local words are said (the script itself never changes)</small></summary><div id="auPron"><p class="muted small">Loading…</p></div></details>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🗂 Versions</h2><small>Every approval is frozen; a change after approval makes a new draft.</small></div>
+      <div class="row"><button class="btn sm" id="auSaveV" ${edit ? '' : 'disabled'}>💾 Save version</button>${a.versions.length > 1 ? '<button class="btn sm" id="auCmp">⇄ Compare</button>' : ''}${a.package ? '<button class="btn sm" id="auPkg">{ } Audio package</button>' : ''}</div></div>
+      <div class="au-vers">${a.versions.map(x => `<div class="au-ver ${x.id === a.version?.id ? 'on' : ''}"><b>v${x.number}</b><span>${esc(x.label || '')}${x.approved ? ' ✅' : x.frozen ? ' 🧊' : ''}</span><span class="small muted">${ago(x.updated_at || x.created_at)}</span>${x.id !== a.version?.id ? `<button class="btn sm" data-restore="${x.id}" ${edit ? '' : 'disabled'}>Restore</button>` : '<b class="ok-t">Current</b>'}</div>`).join('')}</div>
+    </section>
+
+    <div class="card au-approve"><span class="small muted">${a.version?.approved ? `Approved ${ago(a.package?.approved_at)}: Module 6 (video editing) will use this audio.` : 'Approve when the voice, music and timing sound right.'}</span>
+      <button class="btn primary big" id="auApprove" ${edit && !val.errors.length && !a.version?.approved ? '' : 'disabled'}>${a.version?.approved ? '✅ Approved' : '✅ Approve Audio Production'}</button></div>`;
+  auWire();
+  auPron();
+  if (busy) auPoll();
+  window.scrollTo(0, y);
+}
+
+function auWire() {
+  const st = state.cp, a = state.au;
+  $('#auPlan')?.addEventListener('change', e => { state.auPlan = Number(e.target.value); cpAudio(); });
+  const generate = force => auAct(async () => {
+    const r = await api(`/api/creative-projects/${st.project.id}/audio/generate`, { method: 'POST', body: { sb_plan_id: state.auPlan, force } });
+    state.au = await api(`/api/audio-productions/${r.production_id}`); auDraw();
+  });
+  $('#auGen')?.addEventListener('click', () => generate(false));
+  $('#auGenAll')?.addEventListener('click', () => { if (confirm('Run the whole audio again? Locked parts are kept, and the same text, voice and settings reuse the saved voice-over (no new cost).')) generate(false); });
+  $('#auCancel')?.addEventListener('click', () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}/cancel`, { method: 'POST' }); toast('Stopping…'); }));
+  $('#auRetry')?.addEventListener('click', () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}/retry`, { method: 'POST' }); await auReload(); }));
+  if (!a) return;
+  document.querySelectorAll('[data-aujob]').forEach(b => b.onclick = () => auJob(b.dataset.aujob, '', b.dataset.force ? { force: true } : {}));
+  document.querySelectorAll('[data-segregen]').forEach(b => b.onclick = () => auJob('segment', b.dataset.segregen));
+  document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { voice: { settings: { ...a.voice.settings, speed: Number(b.dataset.speed) } } } }); auJob('voiceover'); }));
+  document.querySelectorAll('[data-play]').forEach(b => b.onclick = () => {
+    const au = $('#auVo'); if (!au) return;
+    const [s, e] = b.dataset.play.split(':').map(Number);
+    au.currentTime = s; au.play();
+    const stop = () => { if (au.currentTime >= e) { au.pause(); au.removeEventListener('timeupdate', stop); } };
+    au.addEventListener('timeupdate', stop);
+  });
+  document.querySelectorAll('[data-usevo]').forEach(b => b.onclick = () => auPatch({ voiceover_id: Number(b.dataset.usevo) }));
+  document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => auAct(async () => { state.au = await api(`/api/audio-productions/${a.production.id}/versions/${b.dataset.restore}/restore`, { method: 'POST' }); auDraw(); toast('Version restored as a new draft'); }));
+  $('#auVoices')?.addEventListener('click', () => auVoicePicker(id => auAct(async () => { await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { voice: { voice_id: id, settings: 'reset' } } }); auJob('voice'); })));
+  $('#auVoiceAuto')?.addEventListener('click', () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { voice: { mode: 'auto' } } }); auJob('voice'); }));
+  $('#auLockVo')?.addEventListener('change', e => auPatch({ locked: { voiceover: e.target.checked } }));
+  $('#auLockMu')?.addEventListener('change', e => auPatch({ locked: { music: e.target.checked } }));
+  $('#auAccLong')?.addEventListener('change', e => auPatch({ accept: { long_duration: e.target.checked } }));
+  $('#auAccEst')?.addEventListener('change', e => auPatch({ accept: { estimated_timing: e.target.checked } }));
+  $('#auSetBox')?.addEventListener('toggle', e => { state.auOpenSet = e.target.open; });
+  $('#auPronBox')?.addEventListener('toggle', e => { state.auOpenPron = e.target.open; });
+  document.querySelectorAll('input[type=range][data-set]').forEach(r => r.oninput = () => { const o = document.querySelector(`[data-slv="${r.dataset.set}"]`); if (o) o.textContent = Number(r.value).toFixed(2); });
+  $('#auSetSave')?.addEventListener('click', () => auAct(async () => {
+    const s = {}; document.querySelectorAll('[data-set]').forEach(x => { s[x.dataset.set] = x.type === 'checkbox' ? x.checked : Number(x.value); });
+    await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { voice: { settings: s, model_id: $('#auModel').value, auto_speed: $('#auAutoSpeed').checked } } });
+    auJob('voice');
+  }));
+  $('#auSetReset')?.addEventListener('click', () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { voice: { settings: 'reset', model_id: '' } } }); auJob('voice'); }));
+  $('#auPreset')?.addEventListener('click', () => auAct(async () => {
+    const name = prompt('Preset name', `${a.voice.name} · ${a.context?.creative_type || ''}`); if (!name) return;
+    await api('/api/audio/voice-presets', { method: 'POST', body: { name, voice_id: a.voice.voice_id, model_id: a.voice.model_id, settings: a.voice.settings, market: a.context?.country || '', creative_type: a.context?.creative_type || '' } });
+    toast('Preset saved');
+  }));
+  document.querySelectorAll('#auMode [data-mode]').forEach(b => b.onclick = () => auAct(async () => {
+    const mode = b.dataset.mode;
+    if (mode === 'library') return auLibrary();
+    if (mode === 'upload') return auUpload();
+    await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { music: { mode } } });
+    auJob('music');
+  }));
+  $('#auMApply')?.addEventListener('click', () => auAct(async () => {
+    await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { music: { start: Number($('#auMStart').value), fade_in: Number($('#auMIn').value), fade_out: Number($('#auMOut').value) } } });
+    auJob('music');
+  }));
+  $('#auLib')?.addEventListener('click', () => auLibrary());
+  $('#auUp')?.addEventListener('click', () => auUpload());
+  $('#auMixSave')?.addEventListener('click', () => auAct(async () => {
+    const mix = { ducking: $('#auDuck').checked }; document.querySelectorAll('[data-mixk]').forEach(x => { if (x.value !== '') mix[x.dataset.mixk] = Number(x.value); });
+    await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { mix } });
+    auJob('full', '', { from: 'mix' });
+  }));
+  $('#auMixReset')?.addEventListener('click', () => auAct(async () => { await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { mix: { reset: true } } }); auJob('mix'); }));
+  $('#auSyncOk')?.addEventListener('click', () => auPatch({ sync_apply: true }));
+  $('#auCheck')?.addEventListener('click', () => auAct(async () => { state.au = await api(`/api/audio-productions/${a.production.id}/validate`, { method: 'POST' }); auDraw(); }));
+  $('#auSaveV')?.addEventListener('click', () => auAct(async () => { const label = prompt('Version name (optional)', ''); if (label === null) return; state.au = await api(`/api/audio-productions/${a.production.id}/versions`, { method: 'POST', body: { label } }); auDraw(); toast('Version saved'); }));
+  $('#auCmp')?.addEventListener('click', auCompare);
+  $('#auPkg')?.addEventListener('click', () => auAct(async () => { const p = await api(`/api/audio-productions/${a.production.id}/package`); sbJson(`Audio Production Package v${p.package.schema_version}${p.check.ok ? '' : ' ⚠ ' + p.check.problems.join(' · ')}`, p.package); }));
+  $('#auShortAcc')?.addEventListener('click', () => auAct(async () => { if (!confirm('Send the shorter script to step 7 as a new draft? You approve it there, then make its audio.')) return; const r = await api(`/api/audio-productions/${a.production.id}/shorter/accept`, { method: 'POST' }); toast(r.message); await auReload(); }));
+  $('#auApprove')?.addEventListener('click', () => auAct(async () => {
+    const r = await fetch(`/api/audio-productions/${a.production.id}/approve`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { if (d.validation) { state.au.validation = d.validation; auDraw(); } throw new Error(d.error); }
+    state.au = d; auDraw(); toast('Audio approved: ready for video editing (Module 6)');
+  }));
+}
+
+async function auPron() {
+  const box = $('#auPron'); if (!box) return;
+  const a = state.au, pid = state.cp.product.id;
+  const d = await api(`/api/audio/pronunciation?product_id=${pid}`).catch(() => null); if (!d || !$('#auPron')) return;
+  box.innerHTML = `<p class="small muted">Prices, currencies and numbers are already written out in ${esc(a.context?.language || 'the language')} automatically. Add a rule when a name is said wrongly, then regenerate the voice-over.</p>
+    <table class="t"><thead><tr><th>Written</th><th>Said as</th><th>Where</th><th></th></tr></thead><tbody>${d.rules.map(r => `<tr><td>${esc(r.term)}</td><td>${esc(r.spoken)}${r.type === 'phoneme' ? ` <span class="chip">${esc(r.alphabet)}</span>` : ''}</td><td>${r.product_id ? 'This product' : 'Everywhere'}${r.language ? ` · ${esc(r.language)}` : ''}</td><td><button class="icon-btn sm" data-delrule="${r.id}">🗑</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">No rules yet.</td></tr>'}</tbody></table>
+    <div class="au-trim"><label>Written <input id="prTerm" placeholder="e.g. Xiomi"></label><label>Said as <input id="prSpoken" placeholder="e.g. Shao-mee"></label><label class="fs-tg"><input type="checkbox" id="prProd" checked> Only this product</label><button class="btn sm" id="prAdd">Add rule</button></div>
+    ${a.plan?.pronunciation?.length ? `<p class="small muted">AI suggestions used in the voice-over: ${a.plan.pronunciation.map(p => `${esc(p.term)} → ${esc(p.spoken)}`).join(' · ')}</p>` : ''}`;
+  box.querySelectorAll('[data-delrule]').forEach(b => b.onclick = () => auAct(async () => { await api(`/api/audio/pronunciation/${b.dataset.delrule}`, { method: 'DELETE' }); auPron(); }));
+  $('#prAdd').onclick = () => auAct(async () => {
+    await api('/api/audio/pronunciation', { method: 'POST', body: { term: $('#prTerm').value, spoken: $('#prSpoken').value, product_id: $('#prProd').checked ? pid : null, language: state.au?.voiceover?.language || '' } });
+    toast('Rule added: regenerate the voice-over to hear it'); auPron();
+  });
+}
+
+function auModal(html, width = 900) {
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<div class="modal-card" style="width:min(${width}px,100%)">${html}</div>`;
+  m.onclick = e => { if (e.target === m || e.target.dataset.x !== undefined) m.remove(); };
+  document.body.appendChild(m);
+  return m;
+}
+async function auVoicePicker(onPick) {
+  const a = state.au, lang = a.voiceover?.language || '';
+  const f = { q: '', gender: '', favorites: '', language: (state.cp.product.language || lang || '') };
+  const m = auModal('<p class="muted">Loading voices…</p>');
+  const draw = async () => {
+    const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
+    const d = await api(`/api/audio/voices?${qs}`).catch(fail); if (!d) return;
+    const card = m.querySelector('.modal-card');
+    card.innerHTML = `<div class="sec-h"><div><h2>🗣 Voice library</h2><small>${d.voices.length} voice${d.voices.length === 1 ? '' : 's'} from your ElevenLabs account${d.synced_at ? ` · refreshed ${ago(d.synced_at)}` : ''}. Only voices on the account are shown; nothing is cloned.</small></div><div class="row"><button class="btn sm" id="vlSync">↻ Refresh from ElevenLabs</button><button class="btn sm" data-x>Close</button></div></div>
+      <div class="au-trim"><input id="vlQ" placeholder="Search name, accent, style…" value="${esc(f.q)}"><select id="vlG"><option value="">Any gender</option><option value="female" ${f.gender === 'female' ? 'selected' : ''}>Female</option><option value="male" ${f.gender === 'male' ? 'selected' : ''}>Male</option></select>
+        <select id="vlL"><option value="">Any language</option>${Object.entries(state.auCfg.languages || {}).map(([k, n]) => `<option value="${k}" ${f.language === k ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select><label class="fs-tg"><input type="checkbox" id="vlF" ${f.favorites ? 'checked' : ''}> ⭐ Favourites</label></div>
+      <div class="au-voices">${d.voices.map(v => `<article class="au-voice ${v.voice_id === a.voice?.voice_id ? 'on' : ''}"><div class="au-voice-h"><b>${esc(v.name)}</b>${v.fit ? `<span class="chip ${v.fit.level === 'verified' ? 'win' : ''}">${esc(v.fit.level)}${v.fit.accents.length ? ` · ${esc(v.fit.accents.join(', '))}` : ''}</span>` : ''}<button class="icon-btn sm" data-fav="${esc(v.voice_id)}" data-on="${v.favorite ? 1 : 0}" title="Favourite">${v.favorite ? '⭐' : '☆'}</button></div>
+        <p class="small muted">${esc([v.labels.gender, v.labels.age, v.labels.accent, v.labels.use_case, v.labels.description].filter(Boolean).join(' · '))}</p>${v.description ? `<p class="small">${esc(v.description)}</p>` : ''}
+        ${v.preferred_for.length ? `<p class="small ok-t">Preferred for ${esc(v.preferred_for.join(', '))}</p>` : ''}
+        <div class="row"><button class="btn sm" data-prev="${esc(v.voice_id)}">▶ Preview</button><button class="btn sm primary" data-use="${esc(v.voice_id)}">Use this voice</button>${ME?.user?.role === 'admin' && a.context ? `<button class="btn sm" data-pref="${esc(v.voice_id)}" title="Use this voice by default for ${esc(a.context.country)} in this language">📌 Default for market</button>` : ''}</div></article>`).join('') || '<p class="muted">No voice matches. Refresh from ElevenLabs or change the filters.</p>'}</div>`;
+    $('#vlQ', card).onchange = e => { f.q = e.target.value; draw(); };
+    $('#vlG', card).onchange = e => { f.gender = e.target.value; draw(); };
+    $('#vlL', card).onchange = e => { f.language = e.target.value; draw(); };
+    $('#vlF', card).onchange = e => { f.favorites = e.target.checked ? '1' : ''; draw(); };
+    $('#vlSync', card).onclick = () => auAct(async () => { const r = await api('/api/audio/voices/sync', { method: 'POST' }); toast(`${r.count} voices on the account`); draw(); });
+    card.querySelectorAll('[data-fav]').forEach(b => b.onclick = () => auAct(async () => { await api(`/api/audio/voices/${encodeURIComponent(b.dataset.fav)}/favorite`, { method: 'POST', body: { favorite: b.dataset.on !== '1' } }); draw(); }));
+    card.querySelectorAll('[data-prev]').forEach(b => b.onclick = () => { const au = new Audio(`/api/audio/voices/${encodeURIComponent(b.dataset.prev)}/preview${f.language ? `?language=${f.language}` : ''}`); au.play().catch(() => toast('No preview for this voice', true)); });
+    card.querySelectorAll('[data-use]').forEach(b => b.onclick = () => { m.remove(); onPick(b.dataset.use); });
+    card.querySelectorAll('[data-pref]').forEach(b => b.onclick = () => auAct(async () => { await api('/api/audio/voice-preferences', { method: 'PUT', body: { scope: 'market', scope_key: `${a.context.country}:${state.au.voiceover?.language || f.language}`, voice_id: b.dataset.pref } }); toast('Default voice saved for this market'); draw(); }));
+  };
+  draw();
+}
+async function auLibrary() {
+  const a = state.au;
+  const f = { q: '', mood: '' };
+  const m = auModal('<p class="muted">Loading music…</p>');
+  const draw = async () => {
+    const d = await api(`/api/audio/music?${new URLSearchParams(Object.entries(f).filter(([, v]) => v))}`).catch(fail); if (!d) return;
+    const card = m.querySelector('.modal-card');
+    card.innerHTML = `<div class="sec-h"><div><h2>📚 Music library</h2><small>AI tracks and your uploads, reusable in every creative.</small></div><div class="row"><button class="btn sm" id="mlUp">⬆ Upload</button><button class="btn sm" data-x>Close</button></div></div>
+      <div class="au-trim"><input id="mlQ" placeholder="Search…" value="${esc(f.q)}"><select id="mlM"><option value="">Any mood</option>${(state.auCfg.moods || []).map(x => `<option ${f.mood === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      <div class="au-lib">${d.tracks.map(t => `<div class="au-libt ${t.id === a.music?.asset_id ? 'on' : ''}"><div><b>${esc(t.name)}</b> <button class="icon-btn sm" data-tfav="${t.id}" data-on="${t.favorite ? 1 : 0}">${t.favorite ? '⭐' : '☆'}</button><br><span class="small muted">${t.source === 'ai' ? '✨ AI' : '⬆ Upload'} · ${t.duration.toFixed(0)} s · ${esc(t.mood || '—')}${t.tempo ? ` · ${t.tempo} BPM` : ''} · used ${t.used}× · ${esc(t.license?.commercial_use === 'confirmed' ? `rights confirmed by ${t.license.confirmed_by}` : t.license?.note || '')}</span></div>
+        <audio controls preload="none" src="/api/audio/music/${t.id}/file"></audio><div class="row"><button class="btn sm primary" data-tuse="${t.id}">Use</button><button class="icon-btn sm" data-tren="${t.id}" title="Rename">✏️</button>${t.used ? '' : `<button class="icon-btn sm" data-tdel="${t.id}" title="Delete">🗑</button>`}</div></div>`).join('') || '<p class="muted">The library is empty: generate AI music or upload a track.</p>'}</div>`;
+    $('#mlQ', card).onchange = e => { f.q = e.target.value; draw(); };
+    $('#mlM', card).onchange = e => { f.mood = e.target.value; draw(); };
+    $('#mlUp', card).onclick = () => { m.remove(); auUpload(); };
+    card.querySelectorAll('[data-tuse]').forEach(b => b.onclick = () => auAct(async () => { m.remove(); await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { music: { asset_id: Number(b.dataset.tuse) } } }); auJob('music'); }));
+    card.querySelectorAll('[data-tfav]').forEach(b => b.onclick = () => auAct(async () => { await api(`/api/audio/music/${b.dataset.tfav}`, { method: 'PATCH', body: { favorite: b.dataset.on !== '1' } }); draw(); }));
+    card.querySelectorAll('[data-tren]').forEach(b => b.onclick = () => auAct(async () => { const n = prompt('New name'); if (!n) return; await api(`/api/audio/music/${b.dataset.tren}`, { method: 'PATCH', body: { name: n } }); draw(); }));
+    card.querySelectorAll('[data-tdel]').forEach(b => b.onclick = () => auAct(async () => { if (!confirm('Delete this track from the library?')) return; await api(`/api/audio/music/${b.dataset.tdel}`, { method: 'DELETE' }); draw(); }));
+  };
+  draw();
+}
+function auUpload() {
+  const a = state.au;
+  const m = auModal(`<div class="sec-h"><div><h2>⬆ Upload music</h2><small>MP3, WAV, M4A, AAC, OGG or FLAC · up to ${state.auCfg.music_max_mb || 50} MB</small></div><button class="btn sm" data-x>Close</button></div>
+    <div class="au-form"><input type="file" id="upF" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac"><label>Name <input id="upN"></label><label>Mood <select id="upM"><option value="">—</option>${(state.auCfg.moods || []).map(x => `<option>${x}</option>`).join('')}</select></label>
+      <label>Where it comes from / licence <input id="upL" placeholder="e.g. bought on Artlist, licence #123"></label>
+      <label class="fs-tg"><input type="checkbox" id="upOk"> I own this music or have a licence to use it in paid ads.</label>
+      <button class="btn primary" id="upGo">Upload and use</button></div>`, 560);
+  $('#upGo', m).onclick = () => auAct(async () => {
+    const file = $('#upF', m).files[0];
+    if (!file) throw new Error('Choose a file');
+    if (!$('#upOk', m).checked) throw new Error('Confirm you have the rights to use this music');
+    const fd = new FormData();
+    fd.append('name', $('#upN', m).value || file.name.replace(/\.[^.]+$/, '')); fd.append('mood', $('#upM', m).value); fd.append('license_source', $('#upL', m).value); fd.append('confirm_rights', 'yes'); fd.append('file', file);
+    $('#upGo', m).disabled = true; $('#upGo', m).textContent = 'Uploading…';
+    const r = await fetch('/api/audio/music/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) { $('#upGo', m).disabled = false; $('#upGo', m).textContent = 'Upload and use'; throw new Error(d.error); }
+    m.remove();
+    if (d.duplicate) toast('This file is already in the library: using it');
+    await api(`/api/audio-productions/${a.production.id}`, { method: 'PATCH', body: { music: { asset_id: d.id } } });
+    auJob('music');
+  });
+}
+async function auCompare() {
+  const vs = state.au.versions;
+  const a = prompt(`Compare which versions? Older first, e.g. "${vs[vs.length - 1].number} ${vs[0].number}"`, `${vs[Math.min(1, vs.length - 1)].number} ${vs[0].number}`);
+  if (!a) return;
+  const [x, y] = a.split(/[\s,]+/).map(Number);
+  const A = vs.find(v => v.number === x), B = vs.find(v => v.number === y);
+  if (!A || !B) return fail(new Error('Unknown version number'));
+  try {
+    const d = await api(`/api/audio-productions/${state.au.production.id}/compare?a=${A.id}&b=${B.id}`);
+    const id = state.au.production.id;
+    auModal(`<div class="sec-h"><div><h2>⇄ v${d.a} → v${d.b}</h2></div><button class="btn sm" data-x>Close</button></div>
+      ${d.changes.length ? d.changes.map(c => `<p><b>${esc(c.field)}</b></p><p class="sb-del">${esc(typeof c.before === 'object' ? JSON.stringify(c.before) : c.before ?? '—')}</p><p class="sb-add">${esc(typeof c.after === 'object' ? JSON.stringify(c.after) : c.after ?? '—')}</p>`).join('') : '<p class="muted">No change.</p>'}
+      <div class="au-cmp">${d.voiceovers.map((v, i) => v ? `<div><b>Voice-over v${i ? d.b : d.a}</b><audio controls preload="none" src="/api/audio-productions/${id}/media/voiceover?vo=${v}"></audio></div>` : '').join('')}</div>`);
+  } catch (e) { fail(e); }
 }
 
 // ---------- Team ----------
