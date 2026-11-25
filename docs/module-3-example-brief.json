@@ -1,0 +1,455 @@
+{
+  "schema_version": "1.0",
+  "brief_version": 1,
+  "project_id": 4,
+  "project_name": "Crystal Watch RENAMED: creative 2",
+  "product_id": 1,
+  "created_at": "2026-11-25T18:18:16.981Z",
+  "updated_at": "2026-11-25T18:18:16.981Z",
+  "created_by": "Admin",
+  "product": {
+    "name": "Crystal Watch RENAMED",
+    "description": "Crystal watch with matching bracelet, gold finish.",
+    "image": "",
+    "country": "ZM",
+    "language": "en",
+    "price": "780 ZMW",
+    "offer": "",
+    "links": {
+      "product_page": "",
+      "source": ""
+    },
+    "markets": [
+      {
+        "code": "ZM",
+        "price": "780"
+      }
+    ],
+    "analysis": {
+      "category": "Fashion accessories",
+      "summary": "Crystal Watch is analysed in test mode. These answers are examples, not real AI output.",
+      "…": "(full analysis from Module 1)"
+    },
+    "analysis_id": 1
+  },
+  "marketing_angles": [
+    {
+      "id": 1,
+      "name": "Perfect gift",
+      "description": "Test angle about perfect gift.",
+      "audience": "Women 25-45",
+      "pain_point": "Hard to find the right gift",
+      "message": "Perfect gift with Crystal Watch",
+      "emotion": "Love",
+      "hooks": [
+        "Hook 1 for Perfect gift",
+        "Hook 2 for Perfect gift",
+        "Hook 3 for Perfect gift"
+      ],
+      "creative_types": [
+        "UGC testimonial"
+      ],
+      "why": "Test mode.",
+      "relevant_scenes": 0
+    },
+    {
+      "id": 2,
+      "name": "Everyday elegance",
+      "description": "Test angle about everyday elegance.",
+      "audience": "Women 25-45",
+      "pain_point": "Hard to find the right gift",
+      "message": "Everyday elegance with Crystal Watch",
+      "emotion": "Love",
+      "hooks": [
+        "Hook 1 for Everyday elegance",
+        "Hook 2 for Everyday elegance",
+        "Hook 3 for Everyday elegance"
+      ],
+      "creative_types": [
+        "UGC testimonial"
+      ],
+      "why": "Test mode.",
+      "relevant_scenes": 2
+    }
+  ],
+  "creative_types": [
+    {
+      "id": "demonstration",
+      "name": "Product Demonstration",
+      "description": "Show how the product works, step by step.",
+      "structure": [
+        {
+          "key": "hook",
+          "label": "Hook",
+          "purpose": "A striking moment of the product in action."
+        },
+        {
+          "key": "intro",
+          "label": "Product Introduction",
+          "purpose": "What it is, in one line."
+        },
+        {
+          "key": "how",
+          "label": "How It Works",
+          "purpose": "The key steps or controls."
+        },
+        {
+          "key": "demo",
+          "label": "Demonstration",
+          "purpose": "The product doing its job, close and clear."
+        },
+        {
+          "key": "cta",
+          "label": "CTA",
+          "purpose": "Clear call to action."
+        }
+      ],
+      "recommended_scene_categories": [
+        "demonstration",
+        "closeup",
+        "showcase",
+        "human",
+        "installation",
+        "cta"
+      ],
+      "rules": [],
+      "source": "user"
+    },
+    {
+      "id": "direct_response",
+      "name": "Direct Response",
+      "description": "Short and punchy: need, benefits, offer, order now.",
+      "structure": [
+        {
+          "key": "hook",
+          "label": "Strong Hook",
+          "purpose": "Bold, direct opening."
+        },
+        {
+          "key": "pain",
+          "label": "Pain Point or Need",
+          "purpose": "The need in one line."
+        },
+        {
+          "key": "benefits",
+          "label": "Benefits",
+          "purpose": "Fast list of benefits."
+        },
+        {
+          "key": "offer",
+          "label": "Offer",
+          "purpose": "Price or real promotion (only if provided)."
+        },
+        {
+          "key": "cta",
+          "label": "CTA",
+          "purpose": "Urgent, clear call to action."
+        }
+      ],
+      "recommended_scene_categories": [
+        "hook",
+        "closeup",
+        "features",
+        "showcase",
+        "offer",
+        "cta"
+      ],
+      "rules": [],
+      "source": "user"
+    }
+  ],
+  "footage": {
+    "mode": "manual",
+    "mode_label": "Manual Selection",
+    "audio": "none: only silent copies (all original audio removed and checked with ffprobe)",
+    "scene_ids": [
+      2,
+      4
+    ],
+    "excluded_scene_ids": [],
+    "scenes": [
+      {
+        "id": 2,
+        "asset_id": 1,
+        "start": 3,
+        "end": 6,
+        "duration": 3,
+        "silent_key": "footage/p1/a1/silent.mp4",
+        "quality": 61,
+        "favorite": false,
+        "orientation": "vertical",
+        "categories": [
+          "human",
+          "showcase"
+        ],
+        "angles": [
+          {
+            "angle_id": 2,
+            "score": 80
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "asset_id": 1,
+        "start": 9,
+        "end": 12,
+        "duration": 3,
+        "silent_key": "footage/p1/a1/silent.mp4",
+        "quality": 56,
+        "favorite": false,
+        "orientation": "vertical",
+        "categories": [
+          "human",
+          "problem"
+        ],
+        "angles": [
+          {
+            "angle_id": 2,
+            "score": 85
+          }
+        ]
+      }
+    ],
+    "category_counts": {
+      "human": 2,
+      "showcase": 1,
+      "problem": 1
+    }
+  },
+  "target": {
+    "country": "ZM",
+    "country_name": "Zambia",
+    "language": "en",
+    "language_name": "English",
+    "dialect": "",
+    "currency": "ZMW",
+    "price": "780",
+    "offer": "",
+    "confirmed": {
+      "cash_on_delivery": true,
+      "free_delivery": false,
+      "limited_stock": false,
+      "guarantee": false
+    }
+  },
+  "platform": {
+    "id": "fb_ig",
+    "name": "Facebook and Instagram Ads"
+  },
+  "format": {
+    "duration_seconds": 20,
+    "aspect_ratio": "4:5",
+    "resolution": "1080p",
+    "width": 1080,
+    "height": 1350
+  },
+  "style": {
+    "tone": {
+      "preference": "persuasive",
+      "value": "persuasive",
+      "source": "user"
+    },
+    "editing_pace": {
+      "preference": "dynamic",
+      "value": "dynamic",
+      "source": "user"
+    },
+    "hook_styles": {
+      "preference": [
+        "question",
+        "benefit"
+      ],
+      "values": [
+        "question",
+        "benefit"
+      ]
+    },
+    "custom_hook": "",
+    "cta": "Order Now"
+  },
+  "production": {
+    "voiceover": true,
+    "music": true,
+    "captions": true,
+    "text_overlays": true,
+    "sound_effects": false,
+    "price_display": false,
+    "cta_screen": true,
+    "original_audio": "excluded"
+  },
+  "variations": {
+    "count": 5,
+    "strategies": [
+      "hooks",
+      "angles",
+      "types"
+    ],
+    "strategy_labels": [
+      "Different Hooks",
+      "Different Marketing Angles",
+      "Different Creative Types"
+    ],
+    "distribution": [
+      {
+        "key": "1|demonstration",
+        "angle_ids": [
+          1
+        ],
+        "types": [
+          "demonstration"
+        ],
+        "count": 2
+      },
+      {
+        "key": "1|direct_response",
+        "angle_ids": [
+          1
+        ],
+        "types": [
+          "direct_response"
+        ],
+        "count": 1
+      },
+      {
+        "key": "2|demonstration",
+        "angle_ids": [
+          2
+        ],
+        "types": [
+          "demonstration"
+        ],
+        "count": 1
+      },
+      {
+        "key": "2|direct_response",
+        "angle_ids": [
+          2
+        ],
+        "types": [
+          "direct_response"
+        ],
+        "count": 1
+      }
+    ],
+    "custom_distribution": false,
+    "videos": [
+      {
+        "index": 1,
+        "angle_ids": [
+          1
+        ],
+        "creative_type": "demonstration",
+        "hook_style": "question",
+        "footage_set": 1,
+        "script": "same script base",
+        "editing_style": "dynamic"
+      },
+      {
+        "index": 2,
+        "angle_ids": [
+          1
+        ],
+        "creative_type": "demonstration",
+        "hook_style": "benefit",
+        "footage_set": 1,
+        "script": "same script base",
+        "editing_style": "dynamic"
+      },
+      {
+        "index": 3,
+        "angle_ids": [
+          1
+        ],
+        "creative_type": "direct_response",
+        "hook_style": "question",
+        "footage_set": 1,
+        "script": "same script base",
+        "editing_style": "dynamic"
+      }
+    ],
+    "explanation": "5 videos in total, split over 4 combinations (2 angle groups × 2 creative types). hooks rotate"
+  },
+  "ai_recommendations": {
+    "angles": [
+      {
+        "id": 1,
+        "reason": "3 scenes support \"Perfect gift\"."
+      },
+      {
+        "id": 2,
+        "reason": "3 scenes support \"Everyday elegance\"."
+      }
+    ],
+    "creative_types": [
+      {
+        "id": "demonstration",
+        "reason": "4 scenes match its demonstration or hands-on scenes."
+      },
+      {
+        "id": "direct_response",
+        "reason": "4 scenes match its product close-up or showcase scenes."
+      }
+    ],
+    "duration": {
+      "value": 20,
+      "reason": "Short videos work best on feeds for impulse purchases."
+    },
+    "pace": {
+      "value": "dynamic",
+      "reason": "Several short scenes are available."
+    },
+    "tone": {
+      "value": "persuasive",
+      "reason": "Cash-on-delivery buyers need a clear reason to order."
+    },
+    "hook_styles": [
+      {
+        "value": "question",
+        "reason": "Starts a conversation with the viewer."
+      },
+      {
+        "value": "benefit",
+        "reason": "The main benefit is visible in the footage."
+      }
+    ],
+    "scene_categories": [
+      {
+        "value": "human",
+        "reason": "3 scenes of this kind."
+      },
+      {
+        "value": "showcase",
+        "reason": "2 scenes of this kind."
+      },
+      {
+        "value": "hook",
+        "reason": "2 scenes of this kind."
+      }
+    ],
+    "summary": "Test mode: recommendations made from the real footage counts, without calling the AI.",
+    "made_at": "2026-11-25T18:17:12.283Z"
+  },
+  "validation": {
+    "errors": [],
+    "warnings": [
+      {
+        "code": "angle_footage",
+        "message": "Angle \"Perfect gift\" has only 0 relevant scene(s).",
+        "step": "angles"
+      },
+      {
+        "code": "offer",
+        "message": "No promotional offer is set (fine if there is none).",
+        "step": "settings"
+      },
+      {
+        "code": "few_scenes",
+        "message": "Only 2 distinct scene(s) for 5 video(s) of about 5 parts: videos may repeat footage.",
+        "step": "footage"
+      }
+    ],
+    "valid": true,
+    "checked_at": "2026-11-25T18:18:16.981Z"
+  }
+}

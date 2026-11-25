@@ -261,3 +261,53 @@ addColumn('ai_usage', 'cost_usd', 'REAL NOT NULL DEFAULT 0');      // estimated 
 db.exec(`UPDATE footage_jobs SET status = 'queued', run_after = datetime('now') WHERE status = 'running';`);
 addColumn('footage_jobs', 'options', "TEXT NOT NULL DEFAULT '{}'"); // e.g. {"force":true} = ignore cached AI answers
 addColumn('footage_assets', 'silent', 'INTEGER NOT NULL DEFAULT 0');  // 1 = the working copy (proxy_key) was checked by ffprobe: no audio stream
+
+// ---------- Module 3: creative projects & Creative Brief (new tables only) ----------
+db.exec(`
+-- A creative project: one product + its settings, worked on step by step (draft), until a Creative Brief is saved.
+CREATE TABLE IF NOT EXISTS creative_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','ready')),  -- ready = a Creative Brief is saved and matches the settings
+  settings TEXT NOT NULL DEFAULT '{}',        -- JSON: creative settings (types, market, platform, duration, format, tone, production, variations…)
+  recommendations TEXT NOT NULL DEFAULT '',   -- JSON: last AI recommendations
+  reco_key TEXT NOT NULL DEFAULT '',          -- what they were made from (unchanged = no new AI call)
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cp_product ON creative_projects(product_id);
+-- Marketing angles chosen for a project (references to Module 1 angles).
+CREATE TABLE IF NOT EXISTS creative_project_angles (
+  project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  angle_id INTEGER NOT NULL REFERENCES angles(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (project_id, angle_id)
+);
+-- Scenes picked (manual mode: include) or left out (any mode: exclude) for a project (references to Module 2 scenes).
+CREATE TABLE IF NOT EXISTS creative_project_scenes (
+  project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  scene_id INTEGER NOT NULL REFERENCES footage_scenes(id) ON DELETE CASCADE,
+  choice TEXT NOT NULL CHECK (choice IN ('include','exclude')),
+  PRIMARY KEY (project_id, scene_id)
+);
+-- The variation plan of a project: how many videos, which strategies, how they are distributed.
+CREATE TABLE IF NOT EXISTS creative_variation_plans (
+  project_id INTEGER PRIMARY KEY REFERENCES creative_projects(id) ON DELETE CASCADE,
+  count INTEGER NOT NULL DEFAULT 1 CHECK (count >= 1),
+  strategies TEXT NOT NULL DEFAULT '[]',     -- JSON array of strategy ids
+  distribution TEXT NOT NULL DEFAULT '',     -- JSON: the team's own distribution ('' = automatic)
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Saved Creative Briefs (versioned, never changed after saving): the single source of truth for the next modules.
+CREATE TABLE IF NOT EXISTS creative_briefs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  schema_version TEXT NOT NULL,
+  brief TEXT NOT NULL,                       -- JSON (see server/creative-brief.js)
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (project_id, version)
+);`);

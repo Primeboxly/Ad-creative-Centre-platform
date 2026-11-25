@@ -10,7 +10,9 @@ import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, re
 import { LANGUAGES, aiReady, aiMock } from './ai.js';
 import { safeGet, extractProduct } from './fetchpage.js';
 import { setMarkets, strategyState, startAnalysis, startAngles, startOneAngle, addCustomAngle, updateAngle, saveSelection, aiReadPage } from './strategy.js';
+import { MARKETS } from './markets.js';
 import { mountFootage } from './footage-routes.js';
+import { mountCreative } from './creative-routes.js';
 import { startFootageWorker, deleteProductFootage } from './footage.js';
 import { resetFromEnv } from './maintenance/reset-data.js';
 
@@ -125,15 +127,6 @@ const productOr404 = id => {
   return p;
 };
 
-// Countries we sell in (COD). Prices are typed per product in its market's currency.
-const MARKETS = {
-  ZM: { name: 'Zambia', currency: 'ZMW' }, ZW: { name: 'Zimbabwe', currency: 'USD' }, KE: { name: 'Kenya', currency: 'KES' },
-  TZ: { name: 'Tanzania', currency: 'TZS' }, UG: { name: 'Uganda', currency: 'UGX' }, RW: { name: 'Rwanda', currency: 'RWF' },
-  MW: { name: 'Malawi', currency: 'MWK' }, MZ: { name: 'Mozambique', currency: 'MZN' }, BW: { name: 'Botswana', currency: 'BWP' },
-  NA: { name: 'Namibia', currency: 'NAD' }, NG: { name: 'Nigeria', currency: 'NGN' }, GH: { name: 'Ghana', currency: 'GHS' },
-  CI: { name: "Côte d'Ivoire", currency: 'XOF' }, SN: { name: 'Senegal', currency: 'XOF' }, CM: { name: 'Cameroon', currency: 'XAF' },
-  CD: { name: 'DR Congo', currency: 'CDF' }, MA: { name: 'Morocco', currency: 'MAD' },
-};
 const STATUSES_P = ['idea', 'testing', 'scaling', 'paused'];
 const marketsOf = p => { try { return JSON.parse(p.markets || '[]'); } catch { return []; } };
 const withMarkets = p => ({ ...p, markets: marketsOf(p) });
@@ -156,6 +149,7 @@ app.get('/api/sidebar', (req, res) => {
   res.json({
     products: one(`SELECT COUNT(*) n FROM products`),
     team: one(`SELECT COUNT(*) n FROM users WHERE active = 1`),
+    projects: one(`SELECT COUNT(*) n FROM creative_projects`),
     processing: one(`SELECT COUNT(*) n FROM footage_assets WHERE status IN ('uploaded','queued','storing','metadata','scenes','analyzing','matching')`),
     recent: db.prepare(`SELECT id, name, image FROM products ORDER BY ${LAST_ACTIVITY} DESC LIMIT 6`).all(),
   });
@@ -174,6 +168,8 @@ app.get('/api/dashboard', (req, res) => {
     scenes: one(`SELECT COUNT(*) n FROM footage_scenes`),
     analysed_scenes: one(`SELECT COUNT(*) n FROM footage_scenes WHERE status = 'analyzed'`),
     favorites: one(`SELECT COUNT(*) n FROM footage_scenes WHERE favorite = 1`),
+    projects: one(`SELECT COUNT(*) n FROM creative_projects`),
+    ready_projects: one(`SELECT COUNT(*) n FROM creative_projects WHERE status = 'ready'`),
   });
 });
 
@@ -209,6 +205,7 @@ app.get('/api/products/:id', (req, res) => {
       angles: one(`SELECT COUNT(*) n FROM angles WHERE product_id = ?`),
       selected_angles: one(`SELECT COUNT(*) n FROM angles WHERE product_id = ? AND selected = 1`),
       analysed: one(`SELECT COUNT(*) n FROM analyses WHERE product_id = ? AND status = 'done'`),
+      projects: one(`SELECT COUNT(*) n FROM creative_projects WHERE product_id = ?`),
     },
     author: db.prepare(`SELECT name FROM users WHERE id = ?`).get(p.created_by)?.name || '',
   });
@@ -405,6 +402,9 @@ app.get('/media/product/:id/image', (req, res) => {
 
 // ---------- Footage library & AI scene analysis (Module 2) ----------
 mountFootage(app, { h, idParam, str, productOr404 });
+
+// ---------- Creative projects & Creative Brief (Module 3) ----------
+mountCreative(app, { h, idParam });
 
 // ---------- Errors ----------
 app.use((err, req, res, next) => {

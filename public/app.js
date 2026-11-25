@@ -76,7 +76,7 @@ async function refreshSide() {
   const s = await api('/api/sidebar').catch(() => null);
   if (!s) return;
   const cnt = (id, n) => { $(id).textContent = n ? String(n) : ''; };
-  cnt('#cntProducts', s.products); cnt('#cntTeam', s.team);
+  cnt('#cntProducts', s.products); cnt('#cntTeam', s.team); cnt('#cntProjects', s.projects);
   const cur = (location.hash.match(/^#product\/(\d+)/) || [])[1];
   $('#sideRecent').innerHTML = s.recent.map(p => `<a class="side-p ${String(p.id) === cur ? 'on' : ''}" href="#product/${p.id}">
       ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty">🎬</span>'}<span>${esc(p.name)}</span></a>`).join('')
@@ -96,7 +96,8 @@ function route() {
   clearInterval(state.poll);
   document.body.classList.remove('side-open');
   const [view, id, tab] = (location.hash.slice(1) || 'dashboard').split('/');
-  const nav = view === 'product' ? (tab === 'strategy' ? 'angles' : tab === 'footage' ? 'footage' : 'products') : view;
+  if (state.cp && view !== 'project') { cpFlush(); state.cp = null; } // leaving a project: send unsaved changes
+  const nav = view === 'product' ? (tab === 'strategy' ? 'angles' : tab === 'footage' ? 'footage' : 'products') : view === 'project' ? 'projects' : view;
   document.querySelectorAll('.side-nav a').forEach(a => a.classList.toggle('on', a.dataset.go === nav));
   document.querySelectorAll('.side-p').forEach(a => a.classList.toggle('on', view === 'product' && a.getAttribute('href') === `#product/${id}`));
   if (view === 'team' && ME.user.role === 'admin') return renderTeam();
@@ -104,6 +105,9 @@ function route() {
   if (view === 'products') return renderProducts();
   if (view === 'angles') return renderHub('angles');
   if (view === 'footage') return renderHub('footage');
+  if (view === 'projects') return renderProjects();
+  if (view === 'project' && id === 'new') return renderNewProject();
+  if (view === 'project' && id) return renderProjectPage(Number(id), tab);
   renderDashboard();
 }
 
@@ -273,6 +277,8 @@ function renderOverview() {
             <div><b>Marketing angles</b><small>${c.analysed ? 'Analysed' : 'Not analysed yet'} · ${c.angles} angle${c.angles === 1 ? '' : 's'} · ${c.selected_angles} chosen</small></div><i>→</i></a>
           <a class="ltile" href="#product/${p.id}/footage"><span class="lt-ic" style="background:linear-gradient(135deg,#0ea5e9,#22d3ee)">🎞</span>
             <div><b>Footage library</b><small>${c.videos} video${c.videos === 1 ? '' : 's'} · ${c.analysed_scenes}/${c.scenes} scenes analysed · ${c.favorites} ★</small></div><i>→</i></a>
+          <a class="ltile" href="#projects" data-cpprod="${p.id}"><span class="lt-ic" style="background:linear-gradient(135deg,#ff4d2e,#ff9a3d)">🎬</span>
+            <div><b>Creative projects</b><small>${c.projects} project${c.projects === 1 ? '' : 's'} for this product</small></div><i>→</i></a>
         </div>
       </section>
 
@@ -305,6 +311,7 @@ function renderOverview() {
 
     </div>`;
   $('#tab').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editProduct(p));
+  $('#tab').querySelector('[data-cpprod]')?.addEventListener('click', () => { state.cpFilter = { q: '', product: String(p.id), country: '', type: '', status: '' }; });
   $('#tab').querySelectorAll('[data-link]').forEach(w => {
     const form = $('form', w), input = $('input', form);
     const view = [...w.children].filter(x => x !== form);
@@ -857,6 +864,8 @@ async function renderDashboard() {
         <div><b>Marketing angles</b><small>${d.angles} written · ${d.selected} chosen</small></div><i>→</i></a>
       <a class="ltile" href="#footage"><span class="lt-ic" style="background:linear-gradient(135deg,#0ea5e9,#22d3ee)">🎞</span>
         <div><b>Footage library</b><small>${d.videos} video${d.videos === 1 ? '' : 's'} · ${d.scenes} scenes · ${d.favorites} ★</small></div><i>→</i></a>
+      <a class="ltile" href="#projects"><span class="lt-ic" style="background:linear-gradient(135deg,#ff4d2e,#ff9a3d)">🎬</span>
+        <div><b>Creative projects</b><small>${d.projects} project${d.projects === 1 ? '' : 's'} · ${d.ready_projects} brief${d.ready_projects === 1 ? '' : 's'} saved</small></div><i>→</i></a>
     </div>
     <div class="plist card">
       <div class="prow phead"><div>Recent products</div><div>Status</div><div>Markets</div><div>Analysis</div><div>Angles</div><div>Footage</div><div>Activity</div></div>
@@ -899,6 +908,502 @@ async function renderHub(kind) {
       ${list.map(p => productRow(p).replace(`href="#product/${p.id}"`, `href="#product/${p.id}/${angles ? 'strategy' : 'footage'}"`)).join('')}
       ${list.length ? '' : '<div class="empty">No product yet. Add one from <b>+ New product</b>.</div>'}
     </div>`;
+}
+
+// ---------- Creative projects (Module 3): list, new project, 6-step workflow, Creative Brief ----------
+const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅']];
+const CP_STATUS = { draft: '📝 Draft', ready: '✅ Brief saved' };
+const AIR = 'ai_recommended';
+let REG = null;
+const loadRegistry = async () => (REG ??= await api('/api/creative/registry'));
+const typeName = id => (id === AIR ? '✨ AI Recommended' : REG?.types.find(t => t.id === id)?.name || id);
+
+// ----- List -----
+async function renderProjects() {
+  const v = $('#view');
+  await Promise.all([loadRegistry(), loadMarkets()]);
+  const f = state.cpFilter ??= { q: '', product: '', country: '', type: '', status: '' };
+  const [list, products] = await Promise.all([
+    api('/api/creative-projects?' + new URLSearchParams(Object.entries(f).filter(([, x]) => x))).catch(e => { fail(e); return []; }),
+    api('/api/products').catch(() => []),
+  ]);
+  const opt = (val, label, cur) => `<option value="${esc(val)}" ${String(cur) === String(val) ? 'selected' : ''}>${esc(label)}</option>`;
+  v.innerHTML = `
+    <div class="page-head">
+      <div><h1>🎬 Creative projects</h1><div class="muted">Set up an ad project from a product, its angles and its footage, then save its Creative Brief.</div></div>
+      <button class="btn primary" id="cpNew">+ New creative project</button>
+    </div>
+    <div class="fs-filters" style="position:static">
+      <input type="search" id="cpQ" placeholder="🔍 Search projects…" value="${esc(f.q)}">
+      <select data-cf="product">${opt('', 'All products', f.product)}${products.map(p => opt(p.id, p.name, f.product)).join('')}</select>
+      <select data-cf="country">${opt('', 'All countries', f.country)}${Object.entries(MARKETS || {}).map(([k, m]) => opt(k, m.name, f.country)).join('')}</select>
+      <select data-cf="type">${opt('', 'All creative types', f.type)}${[AIR, ...REG.types.map(t => t.id)].map(t => opt(t, typeName(t), f.type)).join('')}</select>
+      <select data-cf="status">${opt('', 'Any status', f.status)}${Object.entries(CP_STATUS).map(([k, l]) => opt(k, l, f.status)).join('')}</select>
+    </div>
+    <div class="plist card">
+      <div class="prow phead cp-row"><div>Project</div><div>Product</div><div>Creative types</div><div>Market</div><div>Videos</div><div>Status</div><div>Updated</div></div>
+      ${list.map(p => `<a class="prow cp-row" href="#project/${p.id}/${p.status === 'ready' ? 'review' : p.step}">
+          <div><b>${esc(p.name)}</b><small class="muted">by ${esc(p.author)}</small></div>
+          <div class="pname">${p.product_image ? `<img src="/media/product/${p.product_id}/image?v=${encodeURIComponent(p.product_image)}" alt="" loading="lazy">` : '<span class="pimg-empty">🎬</span>'}<span>${esc(p.product_name)}</span></div>
+          <div class="small">${p.types.length ? p.types.map(typeName).join(', ') : '<span class="muted">–</span>'}</div>
+          <div class="small">${p.country ? `${flag(p.country)} ${esc(p.country)} · ${esc((ME.languages[p.language] || p.language || '').slice(0, 10))}` : '<span class="muted">–</span>'}</div>
+          <div class="small">${p.variations || 1} · ${esc(p.aspect || '')} · ${p.duration || ''}s</div>
+          <div><span class="pst ${p.status === 'ready' ? 'st-scaling' : 'st-idea'}">${CP_STATUS[p.status]}${p.brief_version ? ` · v${p.brief_version}` : ''}</span></div>
+          <div class="muted small">${ago(p.updated_at)}</div></a>`).join('')}
+      ${list.length ? '' : `<div class="empty">${Object.values(f).some(Boolean) ? 'No project matches.' : 'No creative project yet. Click <b>+ New creative project</b>.'}</div>`}
+    </div>`;
+  $('#cpNew').onclick = () => { location.hash = 'project/new'; };
+  $('#cpQ').onchange = e => { f.q = e.target.value; renderProjects(); };
+  v.querySelectorAll('[data-cf]').forEach(s => s.onchange = () => { f[s.dataset.cf] = s.value; renderProjects(); });
+}
+
+// ----- New project: pick a product (everything else is loaded from Module 1 and 2) -----
+async function renderNewProject() {
+  const v = $('#view');
+  await loadMarkets();
+  const products = await api('/api/products').catch(e => { fail(e); return []; });
+  v.innerHTML = `
+    <a class="back" href="#projects">← Creative projects</a>
+    <div class="page-head"><div><h1>New creative project</h1><div class="muted">Step 1: choose the product. Its information, angles and footage are loaded from Modules 1 and 2.</div></div></div>
+    ${products.length ? `<div class="cp-products">${products.map(p => `<button class="cp-prod" data-pid="${p.id}">
+        ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty">🎬</span>'}
+        <div><b>${esc(p.name)}</b><small>${p.country ? `${flag(p.country)} ${esc(MARKETS?.[p.country]?.name || p.country)} · ` : ''}${esc(ME.languages[p.language] || '')}</small>
+          <small>🎯 ${p.angles} angles${p.selected_angles ? ` (${p.selected_angles} chosen)` : ''} · 🎞 ${p.videos} videos · ✨ ${p.scenes} scenes</small></div></button>`).join('')}</div>`
+      : '<div class="card s-empty"><div class="s-empty-ic">📦</div><h2>No product yet</h2><p class="muted">Add a product first, analyse it and upload its footage.</p><a class="btn primary big" href="#products">Go to products</a></div>'}`;
+  v.querySelectorAll('[data-pid]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { const { id } = await api('/api/creative-projects', { method: 'POST', body: { product_id: Number(b.dataset.pid) } }); location.hash = `project/${id}/angles`; refreshSide(); }
+    catch (e) { fail(e); b.disabled = false; }
+  });
+}
+
+// ----- One project: the workflow -----
+async function renderProjectPage(id, step) {
+  await Promise.all([loadRegistry(), loadMarkets(), state.footCfg ? null : api('/api/footage/config').then(c => { state.footCfg = c; }).catch(() => {})]);
+  try { state.cp = await api(`/api/creative-projects/${id}`); } catch (e) { fail(e); location.hash = 'projects'; return; }
+  state.cpStep = CP_STEPS.some(([k]) => k === step) ? step : state.cp.settings.step || 'angles';
+  if (state.cp.settings.step !== state.cpStep && state.cp.can_edit) cpSave({ settings: { step: state.cpStep } }, { quiet: true, redraw: false });
+  drawProject();
+}
+
+// Autosave: changes are merged and sent shortly after; the page redraws with the new validation.
+let cpTimer = null, cpPending = null;
+function cpSave(patch, { quiet = false, redraw = true, now = false } = {}) {
+  if (!state.cp?.can_edit) return Promise.resolve();
+  const merge = (a, b) => {
+    const out = { ...a };
+    for (const [k, v] of Object.entries(b)) out[k] = v && typeof v === 'object' && !Array.isArray(v) && a?.[k] && typeof a[k] === 'object' && !Array.isArray(a[k]) ? merge(a[k], v) : v;
+    return out;
+  };
+  cpPending = merge(cpPending || {}, patch);
+  const mark = $('#cpSaved'); if (mark && !quiet) mark.textContent = 'Saving…';
+  clearTimeout(cpTimer);
+  return new Promise(resolve => {
+    cpTimer = setTimeout(async () => {
+      const body = cpPending; cpPending = null;
+      try {
+        state.cp = await api(`/api/creative-projects/${state.cp.project.id}`, { method: 'PATCH', body });
+        const m2 = $('#cpSaved'); if (m2) m2.textContent = '✓ Draft saved';
+        if (redraw) drawProject(true);
+      } catch (e) { fail(e); }
+      resolve();
+    }, now ? 0 : 500);
+  });
+}
+const cpFlush = () => (cpPending ? cpSave({}, { now: true }) : Promise.resolve());
+
+function drawProject(keepScroll = false) {
+  const st = state.cp, s = st.settings, p = st.product;
+  const v = $('#view');
+  const y = window.scrollY, active = document.activeElement?.id;
+  const errs = st.validation.errors, warns = st.validation.warnings;
+  const stepIssues = k => errs.filter(e => e.step === k).length;
+  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready' };
+  v.innerHTML = `
+    <a class="back" href="#projects">← Creative projects</a>
+    <section class="ag-hero cp-hero">
+      <div class="ag-hero-txt"><span class="ag-kicker">Creative project · ${esc(p.name)}</span>
+        <h2><input id="cpName" class="cp-name" value="${esc(st.project.name)}" ${st.can_edit ? '' : 'disabled'} aria-label="Project name"></h2>
+        <p>${CP_STATUS[st.project.status]}${st.briefs[0] ? ` · Brief v${st.briefs[0].version} saved ${ago(st.briefs[0].created_at)}` : ''} · <span id="cpSaved">${st.can_edit ? 'Changes are saved automatically' : 'View only: only its author or an admin can change it'}</span></p></div>
+      <div class="ag-hero-stats">
+        <div><b>${st.angle_ids.length}</b><span>Angles</span></div>
+        <div><b>${st.footage.used_ids.length}</b><span>Scenes</span></div>
+        <div><b>${s.types.length}</b><span>Types</span></div>
+        <div class="hot"><b>${st.variations.count}</b><span>Videos planned</span></div>
+      </div>
+      <div class="ag-hero-btns">
+        <button class="btn" id="cpDup" title="Copy the project (no media copied)">⧉ Duplicate</button>
+        ${st.can_edit ? '<button class="btn" id="cpDel" title="Delete the project">🗑</button><button class="btn" id="cpDraft">💾 Save draft</button>' : ''}
+      </div>
+    </section>
+    <div class="sstepper">
+      ${CP_STEPS.map(([k, l, ic], i) => `<button class="sstep ${state.cpStep === k ? 'on' : ''} ${done[k] && state.cpStep !== k ? 'done' : ''}" data-cpstep="${k}">
+        <span class="sstep-n">${done[k] && state.cpStep !== k ? '✓' : i + 1}</span><span class="sstep-t"><small>Step ${i + 1}${stepIssues(k) ? ` · <b style="color:var(--bad)">${stepIssues(k)} to fix</b>` : ''}</small>${ic} ${l}</span></button>
+        ${i < CP_STEPS.length - 1 ? '<span class="sstep-line"></span>' : ''}`).join('')}
+    </div>
+    <div id="cpBody"></div>
+    <div class="cp-nav">
+      ${state.cpStep !== 'product' ? '<button class="btn" id="cpPrev">← Back</button>' : '<span></span>'}
+      <span class="muted small">${errs.length ? `⛔ ${errs.length} blocking · ` : ''}${warns.length ? `⚠ ${warns.length} warning${warns.length > 1 ? 's' : ''}` : errs.length ? '' : '✓ Ready'}</span>
+      ${state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>`}
+    </div>`;
+  const go = async k => { await cpFlush(); state.cpStep = k; location.hash = `project/${st.project.id}/${k}`; };
+  v.querySelectorAll('[data-cpstep]').forEach(b => b.onclick = () => go(b.dataset.cpstep));
+  const idx = CP_STEPS.findIndex(([k]) => k === state.cpStep);
+  $('#cpPrev')?.addEventListener('click', () => go(CP_STEPS[idx - 1][0]));
+  $('#cpNext')?.addEventListener('click', () => go(CP_STEPS[idx + 1][0]));
+  $('#cpBrief')?.addEventListener('click', cpSaveBrief);
+  $('#cpName').onchange = e => cpSave({ name: e.target.value });
+  $('#cpDraft')?.addEventListener('click', async () => { await cpFlush(); await cpSave({ settings: { step: state.cpStep } }, { now: true }); toast('Draft saved'); });
+  $('#cpDup').onclick = async () => { try { await cpFlush(); const { id } = await api(`/api/creative-projects/${st.project.id}/duplicate`, { method: 'POST' }); toast('Project duplicated (no media copied)'); location.hash = `project/${id}/review`; } catch (e) { fail(e); } };
+  $('#cpDel')?.addEventListener('click', async () => {
+    if (!confirm(`Delete the project "${st.project.name}" and its saved briefs? Products and footage are not touched.`)) return;
+    try { await api(`/api/creative-projects/${st.project.id}`, { method: 'DELETE' }); toast('Project deleted'); location.hash = 'projects'; refreshSide(); } catch (e) { fail(e); }
+  });
+  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview })[state.cpStep]();
+  if (!st.can_edit) $('#cpBody').querySelectorAll('input, select, textarea, button:not([data-view])').forEach(x => { x.disabled = true; });
+  if (keepScroll) { window.scrollTo(0, y); if (active) { const el = document.getElementById(active); if (el && el.type !== 'checkbox') { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } } }
+}
+
+// Problems of a step, shown at its top.
+const cpIssues = step => {
+  const { errors, warnings } = state.cp.validation;
+  const e = errors.filter(x => x.step === step), w = warnings.filter(x => x.step === step);
+  return e.length || w.length ? `<div class="cp-issues">${e.map(x => `<div class="cp-err">⛔ ${esc(x.message)}</div>`).join('')}${w.map(x => `<div class="cp-warn">⚠ ${esc(x.message)}</div>`).join('')}</div>` : '';
+};
+
+// AI recommendations card (steps angles, type, settings, review).
+function cpRecoCard(focus) {
+  const st = state.cp, r = st.recommendations;
+  const accept = (label, act, on) => `<button class="btn sm ${on ? 'ghost' : ''}" data-racc="${act}" ${on ? 'disabled' : ''}>${on ? '✓ Applied' : label}</button>`;
+  const s = st.settings;
+  const rows = !r ? '' : [
+    focus !== 'settings' && r.angles.length ? `<div class="rc-row"><b>🎯 Angles</b><div>${r.angles.map(a => `<p><span>${esc(st.angles.find(x => x.id === a.id)?.name || a.id)}</span> ${esc(a.reason)}</p>`).join('')}</div>${accept('Use these angles', 'angles', r.angles.every(a => st.angle_ids.includes(a.id)))}</div>` : '',
+    focus !== 'angles' && r.creative_types.length ? `<div class="rc-row"><b>🎬 Creative types</b><div>${r.creative_types.map(t => `<p><span>${esc(typeName(t.id))}</span> ${esc(t.reason)}</p>`).join('')}</div>${accept('Use these types', 'types', r.creative_types.every(t => s.types.includes(t.id)))}</div>` : '',
+    focus === 'settings' || focus === 'review' ? [
+      `<div class="rc-row"><b>⏱ Duration</b><div><p><span>${r.duration.value} s</span> ${esc(r.duration.reason)}</p></div>${accept('Apply', 'duration', s.duration === r.duration.value)}</div>`,
+      `<div class="rc-row"><b>🎞 Pace</b><div><p><span>${esc(REG.paces[r.pace.value])}</span> ${esc(r.pace.reason)}</p></div>${accept('Apply', 'pace', s.pace === r.pace.value)}</div>`,
+      `<div class="rc-row"><b>🎙 Tone</b><div><p><span>${esc(REG.tones[r.tone.value])}</span> ${esc(r.tone.reason)}</p></div>${accept('Apply', 'tone', s.tone === r.tone.value)}</div>`,
+      `<div class="rc-row"><b>🪝 Hooks</b><div>${r.hook_styles.map(h => `<p><span>${esc(REG.hookStyles[h.value])}</span> ${esc(h.reason)}</p>`).join('')}</div>${accept('Apply', 'hooks', r.hook_styles.every(h => s.hook_styles.includes(h.value)))}</div>`,
+    ].join('') : '',
+    r.scene_categories.length && focus !== 'angles' ? `<div class="rc-row"><b>🎞 Footage to favour</b><div>${r.scene_categories.map(c => `<p><span>${esc(state.footCfg?.categories?.[c.value] || c.value)}</span> ${esc(c.reason)}</p>`).join('')}</div><span></span></div>` : '',
+  ].join('');
+  return `<section class="card cp-reco">
+    <div class="sec-h"><div><h2>✨ AI recommendations</h2><small>${r ? esc(r.summary) : 'Based on the product analysis and the footage that really exists.'}</small></div>
+      <div class="row">${r ? `<button class="btn sm primary" data-racc="all">Apply all</button>` : ''}<button class="btn sm ${r ? '' : 'primary'}" id="cpReco" ${st.ai ? '' : 'disabled title="AI is not set up"'}>${r ? '↻ Refresh' : '✨ Get recommendations'}</button></div></div>
+    ${rows}
+  </section>`;
+}
+function cpWireReco() {
+  const st = state.cp, r = st.recommendations;
+  $('#cpReco')?.addEventListener('click', async e => {
+    const b = e.currentTarget; b.disabled = true; b.innerHTML = '<span class="spin sm"></span> Thinking…';
+    try { await cpFlush(); const out = await api(`/api/creative-projects/${st.project.id}/recommendations`, { method: 'POST', body: { force: !!r } }); state.cp = out.state; toast(out.recommendations.cached ? 'Recommendations (unchanged inputs, no new AI call)' : 'Recommendations ready'); drawProject(true); }
+    catch (err) { fail(err); b.disabled = false; b.textContent = '✨ Get recommendations'; }
+  });
+  document.querySelectorAll('[data-racc]').forEach(b => b.onclick = () => {
+    const a = b.dataset.racc, s = st.settings, patch = { settings: {} };
+    const all = a === 'all';
+    if (all || a === 'angles') patch.angle_ids = [...new Set([...r.angles.map(x => x.id), ...(all ? [] : st.angle_ids)])];
+    if (all || a === 'types') patch.settings.types = [...new Set([...r.creative_types.map(t => t.id), ...s.types.filter(t => t !== AIR && !all)])];
+    if (all || a === 'duration') patch.settings.duration = r.duration.value;
+    if (all || a === 'pace') patch.settings.pace = r.pace.value;
+    if (all || a === 'tone') patch.settings.tone = r.tone.value;
+    if (all || a === 'hooks') patch.settings.hook_styles = r.hook_styles.map(h => h.value);
+    if (!Object.keys(patch.settings).length) delete patch.settings;
+    cpSave(patch, { now: true }).then(() => toast(all ? 'All recommendations applied' : 'Applied'));
+  });
+}
+
+// Step 1: product (read-only: it comes from Module 1)
+function cpProduct() {
+  const st = state.cp, p = st.product, fs = st.footage.status;
+  $('#cpBody').innerHTML = `
+    <section class="card cp-prodcard">
+      ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty big">🎬</span>'}
+      <div><h2>${esc(p.name)}</h2>
+        <p class="muted">${p.country ? `${flag(p.country)} ${esc(MARKETS?.[p.country]?.name || p.country)}` : 'No target country'} · ${esc(ME.languages[p.language] || p.language)} · ${esc(p.price || 'no price')}${p.offer ? ` · 🏷 ${esc(p.offer)}` : ''}</p>
+        <div class="cp-facts">
+          <span>🧠 ${st.analysis ? 'Analysed' : 'Not analysed'}</span><span>🎯 ${st.angles.length} angles · ${st.angles.filter(a => a.selected).length} chosen</span>
+          <span>🎞 ${fs.videos} video${fs.videos === 1 ? '' : 's'}${fs.processing ? ` (${fs.processing} in work)` : ''}</span><span>✨ ${fs.analysed}/${fs.scenes} scenes analysed</span><span>🔇 ${fs.eligible} production-ready</span>
+        </div>
+        <p class="small muted">The product information comes from Module 1: edit it on the product page. To use another product, create a new project.</p>
+        <div class="row"><a class="btn sm" href="#product/${p.id}/strategy">Open its marketing angles</a><a class="btn sm" href="#product/${p.id}/footage">Open its footage library</a></div>
+      </div>
+    </section>
+    ${!st.analysis || !st.angles.length ? '<div class="cp-issues"><div class="cp-warn">⚠ The product has no analysis or no marketing angles yet: open its Marketing angles tab (Module 1) first.</div></div>' : ''}
+    ${!fs.eligible ? `<div class="cp-issues"><div class="cp-err">⛔ No analysed, silent footage yet. <a href="#product/${p.id}/footage">Upload and analyse videos in its Footage library (Module 2) →</a></div></div>` : ''}`;
+}
+
+// Step 2: marketing angles
+function cpAngles() {
+  const st = state.cp, sel = new Set(st.angle_ids), rec = new Set((st.recommendations?.angles || []).map(a => a.id));
+  $('#cpBody').innerHTML = `${cpIssues('angles')}${cpRecoCard('angles')}
+    <div class="ag-tools"></div>
+    ${st.angles.length ? `<div class="angles">${st.angles.map((a, i) => `<article class="angle th${i % 8} ${sel.has(a.id) ? 'on' : ''}" data-cpang="${a.id}">
+        <header class="ang-head"><span class="ang-num">${String(i + 1).padStart(2, '0')}</span>
+          <div class="ang-title"><h3>${esc(a.name)}</h3>${rec.has(a.id) ? '<span class="ang-emo">✨ AI recommends</span>' : a.emotion ? `<span class="ang-emo">${esc(a.emotion)}</span>` : ''}</div>
+          <span class="ang-check">${sel.has(a.id) ? '✓' : '＋'}</span></header>
+        <div class="ang-msg"><span>Selling message</span><p>${esc(a.message)}</p></div>
+        <div class="ang-in"><p class="ang-desc">${esc(a.description)}</p>
+          <div class="ang-hooks"><span>🎬 Suggested opening lines</span>${a.hooks.map(h => `<p><b>▶</b>${esc(h)}</p>`).join('')}</div></div>
+        <footer class="ang-actions"><span class="small"><b>${st.angleScenes[a.id] || 0}</b> relevant scene${st.angleScenes[a.id] === 1 ? '' : 's'}</span><span class="ang-pick">${sel.has(a.id) ? '✓ Selected' : 'Click to select'}</span></footer>
+      </article>`).join('')}</div>`
+      : `<div class="card s-empty"><div class="s-empty-ic">🎯</div><h2>No marketing angle yet</h2><p class="muted">Analyse the product and write its angles first.</p><a class="btn primary big" href="#product/${st.product.id}/strategy">Open Marketing angles</a></div>`}
+    ${st.angles.length && state.cp.can_edit ? `<details class="card cp-custom"><summary><b>＋ Add a custom marketing angle</b> <small class="muted">saved with the product (Module 1)</small></summary>
+      <form id="cpAngForm"><label class="f">Name</label><input name="name" required maxlength="80" placeholder="e.g. The gift she wears every day">
+        <label class="f">Main selling message</label><input name="message" required maxlength="200">
+        <label class="f">Description</label><textarea name="description" rows="2"></textarea>
+        <button class="btn primary" style="margin-top:10px">Add the angle</button></form></details>` : ''}`;
+  cpWireReco();
+  $('#cpBody').querySelectorAll('[data-cpang]').forEach(c => c.onclick = () => {
+    const id = Number(c.dataset.cpang);
+    const ids = sel.has(id) ? st.angle_ids.filter(x => x !== id) : [...st.angle_ids, id];
+    cpSave({ angle_ids: ids }, { now: true });
+  });
+  $('#cpAngForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const { id } = await api(`/api/products/${st.product.id}/angles`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) });
+      await cpSave({ angle_ids: [...st.angle_ids, id] }, { now: true }); toast('Custom angle added');
+    } catch (err) { fail(err); }
+  });
+}
+
+// Step 3: footage
+function cpFootage() {
+  const st = state.cp, s = st.settings, f = st.footage;
+  const cats = state.footCfg?.categories || {};
+  state.cp.footCats = cats;
+  const inc = new Set(f.include), exc = new Set(f.exclude), used = new Set(f.used_ids);
+  const flt = state.cpSceneFlt ??= { cat: '' };
+  const shown = f.scenes.filter(x => !flt.cat || x.categories.includes(flt.cat));
+  const modes = { auto: ['🤖', 'Automatic Selection', 'The future AI Creative Director picks the best scenes for each angle, type and quality.'], favorites: ['★', 'Favorites Only', 'Only scenes marked as favourites in the Footage library.'], manual: ['✋', 'Manual Selection', 'Pick the scenes yourself.'] };
+  $('#cpBody').innerHTML = `${cpIssues('footage')}
+    <div class="cp-modes">${Object.entries(modes).map(([k, [ic, t, d]]) => `<button class="cp-mode ${s.footage_mode === k ? 'on' : ''}" data-fmode="${k}"><i>${ic}</i><div><b>${t}</b><small>${d}</small></div></button>`).join('')}</div>
+    <p class="small muted">Only analysed scenes from silent copies are listed (no original sound). Scenes excluded in the Footage library are never used. ${f.status.eligible} production-ready scene(s) · <b>${used.size}</b> used by this project.</p>
+    ${f.scenes.length ? `<div class="fs-filters" style="position:static"><select id="cpCat"><option value="">All categories</option>${Object.entries(cats).map(([k, l]) => `<option value="${k}" ${flt.cat === k ? 'selected' : ''}>${esc(l)} (${f.categories[k] || 0})</option>`).join('')}</select>
+      ${s.footage_mode === 'manual' ? '<button class="btn sm" id="cpAllIn">Select all shown</button><button class="btn sm" id="cpNoneIn">Clear</button>' : ''}</div>
+      <div class="fs-grid">${shown.map(x => {
+        const on = used.has(x.id), manual = s.footage_mode === 'manual';
+        return `<article class="fs-card cp-scene ${on ? 'cp-on' : 'excl'}" data-scid="${x.id}">
+          <div class="fs-media ${x.orientation || ''}"><img src="/media/scene/${x.id}/thumb?v=${x.start}" alt="" loading="lazy">
+            <span class="fs-q ${qClass(x.quality)}">${x.quality ?? '–'}</span><span class="fv-dur">${x.duration.toFixed(1)}s</span>
+            ${x.favorite ? '<span class="fs-flags"><span>★</span></span>' : ''}
+            <span class="cp-tick">${on ? '✓' : manual ? '＋' : '🚫'}</span></div>
+          <div class="fs-body"><div class="fs-time">${fmtT(x.start)} → ${fmtT(x.end)} <span>· ${esc(x.asset_name)}</span></div>
+            <p class="fs-desc">${esc(x.description || '')}</p>
+            <div class="fs-cats">${x.categories.slice(0, 3).map(c => `<span>${esc(cats[c] || c)}</span>`).join('')}</div>
+            ${x.angles.filter(a => st.angle_ids.includes(a.angle_id)).length ? `<div class="fs-angles">${x.angles.filter(a => st.angle_ids.includes(a.angle_id)).map(a => `<span><b>${a.score}%</b> ${esc(st.angles.find(z => z.id === a.angle_id)?.name || '')}</span>`).join('')}</div>` : ''}
+            <button class="btn sm" data-view="${x.id}">▶ Preview</button>
+            <small class="muted">${manual ? (on ? 'Selected: click to remove' : 'Click to select') : (on ? 'Used: click to leave it out' : 'Left out: click to use it')}</small></div>
+        </article>`;
+      }).join('')}</div>` : `<div class="card s-empty"><div class="s-empty-ic">🎞</div><h2>No production-ready footage</h2><p class="muted">Upload videos and let the AI analyse them first.</p><a class="btn primary big" href="#product/${st.product.id}/footage">Open the Footage library</a></div>`}`;
+  $('#cpBody').querySelectorAll('[data-fmode]').forEach(b => b.onclick = () => cpSave({ settings: { footage_mode: b.dataset.fmode } }, { now: true }));
+  $('#cpCat')?.addEventListener('change', e => { flt.cat = e.target.value; cpFootage(); });
+  const setScenes = (i, e) => cpSave({ scenes: { include: [...i], exclude: [...e] } }, { now: true });
+  $('#cpAllIn')?.addEventListener('click', () => { shown.forEach(x => inc.add(x.id)); setScenes(inc, exc); });
+  $('#cpNoneIn')?.addEventListener('click', () => setScenes([], exc));
+  $('#cpBody').querySelectorAll('[data-scid]').forEach(c => c.onclick = e => {
+    const id = Number(c.dataset.scid);
+    if (e.target.closest('[data-view]')) { const x = f.scenes.find(z => z.id === id); return playScene(x); }
+    if (!st.can_edit) return;
+    if (s.footage_mode === 'manual') { inc.has(id) ? inc.delete(id) : inc.add(id); exc.delete(id); }
+    else { exc.has(id) ? exc.delete(id) : exc.add(id); }
+    setScenes(inc, exc);
+  });
+}
+// Plays just the seconds of a scene from the silent copy.
+function playScene(x) {
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<video src="/media/footage/${x.asset_id}/preview#t=${x.start},${x.end}" controls autoplay muted playsinline></video>`;
+  const vid = $('video', m);
+  vid.onloadedmetadata = () => { vid.currentTime = x.start; };
+  vid.ontimeupdate = () => { if (vid.currentTime >= x.end) vid.currentTime = x.start; };
+  m.onclick = e => { if (e.target === m) m.remove(); };
+  document.body.appendChild(m);
+}
+
+// Step 4: creative types
+function cpType() {
+  const st = state.cp, s = st.settings, chosen = new Set(s.types), rec = new Map((st.recommendations?.creative_types || []).map(t => [t.id, t.reason]));
+  const card = (t, i) => {
+    const sup = st.typeSupport[t.id] || 0, noOffer = t.requiresOffer && !s.market.offer;
+    return `<article class="cp-type ${chosen.has(t.id) ? 'on' : ''}" data-ctype="${t.id}">
+      <div class="cp-type-h"><i>${t.icon}</i><div><b>${esc(t.name)}</b><small>${esc(t.description)}</small></div><span class="ang-check">${chosen.has(t.id) ? '✓' : '＋'}</span></div>
+      <div class="cp-struct">${t.structure.map(b => `<span title="${esc(b.purpose)}">${esc(b.label)}</span>`).join('<i>→</i>')}</div>
+      <div class="cp-type-f">
+        <span class="${sup ? 'ok' : 'bad'}">${sup ? `🎞 ${sup} matching scene${sup > 1 ? 's' : ''}` : `⚠ No ${esc(t.needs.label)}`}</span>
+        ${noOffer ? '<span class="bad">🏷 Needs a real offer</span>' : ''}${rec.has(t.id) ? `<span class="ok" title="${esc(rec.get(t.id))}">✨ AI recommends</span>` : ''}
+      </div>
+      ${t.rules.length ? `<p class="small muted">${t.rules.map(esc).join(' ')}</p>` : ''}
+    </article>`;
+  };
+  $('#cpBody').innerHTML = `${cpIssues('type')}${cpRecoCard('type')}
+    <div class="cp-types">
+      <article class="cp-type ai ${chosen.has(AIR) ? 'on' : ''}" data-ctype="${AIR}">
+        <div class="cp-type-h"><i>✨</i><div><b>AI Recommended</b><small>The AI picks the types that fit the product, the angles and the footage you really have.${st.recommendations ? ` Now: ${st.recommendations.creative_types.map(t => esc(typeName(t.id))).join(', ') || 'none'}.` : ' Get the recommendations to see them.'}</small></div><span class="ang-check">${chosen.has(AIR) ? '✓' : '＋'}</span></div>
+      </article>
+      ${REG.types.map(card).join('')}
+    </div>
+    <p class="small muted">You can choose several types: with the strategy "Different Creative Types", the videos are split between them. These structures guide the future scripts and storyboards.</p>`;
+  cpWireReco();
+  $('#cpBody').querySelectorAll('[data-ctype]').forEach(c => c.onclick = () => {
+    const id = c.dataset.ctype;
+    cpSave({ settings: { types: chosen.has(id) ? s.types.filter(x => x !== id) : [...s.types, id] } }, { now: true });
+  });
+}
+
+// Step 5: settings
+function cpSettings() {
+  const st = state.cp, s = st.settings, m = s.market, d = st.productDefaults, pl = st.plan;
+  const opt = (val, label, cur) => `<option value="${esc(val)}" ${String(cur) === String(val) ? 'selected' : ''}>${esc(label)}</option>`;
+  const chips = (key, values, cur, multi = false) => `<div class="chip-pick">${Object.entries(values).map(([k, l]) => `<button type="button" class="${(multi ? cur.includes(k) : cur === k) ? 'on' : ''}" data-chip="${key}" data-val="${k}">${k === AIR ? '✨ ' : ''}${esc(l)}</button>`).join('')}</div>`;
+  const inh = (k, label) => (String(m[k] ?? '') === String(d[k] ?? '') ? `<small class="cp-inh">from the product</small>` : `<small class="cp-inh own">project only · <a data-reset="${k}">use the product's: ${esc(d[k] || 'empty')}</a></small>`);
+  const platDef = REG.platforms[s.platform]?.defaults;
+  const platDiff = platDef && (platDef.aspect !== s.aspect || platDef.duration !== s.duration || platDef.pace !== s.pace);
+  const cod = m.cod;
+  $('#cpBody').innerHTML = `${cpIssues('settings')}${cpRecoCard('settings')}
+    <section class="card cp-sec"><h3>🌍 Target market</h3>
+      <div class="cp-grid">
+        <label>Country ${inh('country')}<select data-m="country">${opt('', '—', m.country)}${Object.entries(MARKETS || {}).map(([k, x]) => opt(k, x.name, m.country)).join('')}</select></label>
+        <label>Language ${inh('language')}<select data-m="language">${Object.entries(ME.languages).map(([k, l]) => opt(k, l, m.language)).join('')}</select></label>
+        <label>Regional variant / dialect<input data-m="dialect" list="cpDialects" value="${esc(m.dialect)}" placeholder="optional"><datalist id="cpDialects">${(REG.dialects[m.language] || []).map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
+        <label>Currency ${inh('currency')}<input data-m="currency" value="${esc(m.currency)}" maxlength="8"></label>
+        <label>Selling price ${inh('price')}<input data-m="price" value="${esc(m.price)}" placeholder="e.g. 780"></label>
+        <label class="wide">Promotional offer (only a real one) ${inh('offer')}<input data-m="offer" value="${esc(m.offer)}" placeholder="e.g. Buy 2, get the 3rd free"></label>
+      </div>
+      <div class="cp-confirm"><span class="small muted">Confirmed conditions (only these may be said in the ads):</span>
+        ${[['cod', 'Cash on delivery'], ['free_delivery', 'Free delivery'], ['limited_stock', 'Limited stock'], ['guarantee', 'Guarantee']].map(([k, l]) => `<label class="fs-tg"><input type="checkbox" data-mc="${k}" ${m[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+    </section>
+
+    <section class="card cp-sec"><h3>📱 Platform, duration & format</h3>
+      ${chips('platform', Object.fromEntries(Object.entries(REG.platforms).map(([k, x]) => [k, x.name])), s.platform)}
+      ${platDiff ? `<p class="small">Suggested for ${esc(REG.platforms[s.platform].name)}: ${platDef.aspect} · ${platDef.duration} s · ${esc(REG.paces[platDef.pace])} pace <button class="btn sm" id="cpPlatDef">Apply</button></p>` : ''}
+      <h4>Target duration</h4>
+      <div class="chip-pick">${REG.durations.map(x => `<button type="button" class="${s.duration === x ? 'on' : ''}" data-dur="${x}">${x} s</button>`).join('')}
+        <label class="fs-tg">Custom <input type="number" id="cpDur" min="${REG.limits.minDuration}" max="${REG.limits.maxDuration}" value="${s.duration}" style="width:80px"> s</label></div>
+      <h4>Aspect ratio</h4>
+      <div class="cp-aspects">${Object.entries(REG.aspects).map(([k, a]) => { const [w, h] = a.sizes['1080p']; return `<button type="button" class="cp-asp ${s.aspect === k ? 'on' : ''}" data-asp="${k}"><span style="aspect-ratio:${w}/${h}"></span><b>${k}</b><small>${esc(a.name.split(' ')[0])}</small></button>`; }).join('')}</div>
+      <div class="row"><span class="small">Output resolution:</span>${REG.resolutions.map(r => { const [w, h] = REG.aspects[s.aspect].sizes[r]; return `<label class="fs-tg"><input type="radio" name="cpRes" value="${r}" ${s.resolution === r ? 'checked' : ''}> ${r} (${w}×${h})</label>`; }).join('')}</div>
+    </section>
+
+    <section class="card cp-sec"><h3>🎨 Style</h3>
+      <h4>Advertising tone</h4>${chips('tone', REG.tones, s.tone)}
+      <h4>Editing pace</h4>${chips('pace', REG.paces, s.pace)}
+      <h4>Hook style <small class="muted">one or several</small></h4>${chips('hook_styles', REG.hookStyles, s.hook_styles, true)}
+      <label class="f">Custom hook (optional)</label><input id="cpHook" value="${esc(s.custom_hook)}" maxlength="200" placeholder="e.g. Still looking for the perfect gift?">
+      <h4>Call to action</h4>
+      <div class="chip-pick">${REG.ctas.map(c => { const blocked = c.needs === 'cod' && !cod; return `<button type="button" class="${s.cta === c.text ? 'on' : ''}" data-cta="${esc(c.text)}" ${blocked ? 'disabled title="Confirm cash on delivery in Target market first"' : ''}>${esc(c.text)}</button>`; }).join('')}</div>
+      <input id="cpCta" value="${esc(s.cta)}" maxlength="120" placeholder="Write your own call to action">
+    </section>
+
+    <details class="card cp-sec" ${state.cpAdv ? 'open' : ''} id="cpAdv"><summary><h3 style="display:inline">🎛 Production preferences</h3> <small class="muted">preferences only: nothing is generated in this module</small></summary>
+      <div class="cp-toggles">${Object.entries(REG.production).map(([k, x]) => `<label class="cp-toggle"><input type="checkbox" data-prod="${k}" ${s.production[k] ? 'checked' : ''}><span></span>${esc(x.label)}</label>`).join('')}
+        <label class="cp-toggle locked"><input type="checkbox" disabled><span></span>Original footage sound <small>always off</small></label></div>
+    </details>
+
+    <section class="card cp-sec"><h3>🔁 Variations</h3>
+      <div class="chip-pick">${REG.variationCounts.map(x => `<button type="button" class="${st.variations.count === x ? 'on' : ''}" data-vc="${x}">${x} video${x > 1 ? 's' : ''}</button>`).join('')}
+        <label class="fs-tg">Custom <input type="number" id="cpVc" min="1" max="${REG.limits.maxVariations}" value="${st.variations.count}" style="width:80px"></label></div>
+      <h4>Variation strategies</h4>
+      <div class="chip-pick">${Object.entries(REG.strategies).map(([k, l]) => `<button type="button" class="${st.variations.strategies.includes(k) ? 'on' : ''}" data-vs="${k}">${esc(l)}</button>`).join('')}</div>
+      <div class="cp-plan"><p>${esc(pl.explanation)}</p>
+        <table><thead><tr><th>Angle</th><th>Creative type</th><th>Videos</th></tr></thead><tbody>
+          ${pl.combos.map((c, i) => `<tr><td>${c.angle_ids.map(a => esc(st.angles.find(x => x.id === a)?.name || a)).join(' + ') || '—'}</td><td>${c.types.map(t => esc(typeName(t))).join(' + ') || '—'}</td>
+            <td><input type="number" min="0" max="${REG.limits.maxVariations}" value="${c.count}" data-dist="${i}" style="width:70px"></td></tr>`).join('')}
+        </tbody><tfoot><tr><td colspan="2">Total ${pl.custom ? '(your distribution)' : '(automatic)'}</td><td><b class="${pl.total === st.variations.count ? '' : 'bad'}">${pl.total} / ${st.variations.count}</b></td></tr></tfoot></table>
+        ${pl.custom ? '<button class="btn sm" id="cpDistAuto">↺ Back to automatic</button>' : ''}
+        <p class="small muted">The number of variations is the total number of videos. Videos must differ in a meaningful way (not only cosmetic changes). Bulk generation comes in Module 9.</p></div>
+    </section>`;
+  cpWireReco();
+  const b = $('#cpBody');
+  b.querySelectorAll('[data-m]').forEach(i => i.onchange = () => cpSave({ settings: { market: { [i.dataset.m]: i.value, ...(i.dataset.m === 'country' && MARKETS?.[i.value] ? { currency: MARKETS[i.value].currency } : {}) } } }));
+  b.querySelectorAll('[data-reset]').forEach(a => a.onclick = () => cpSave({ settings: { market: { [a.dataset.reset]: d[a.dataset.reset] } } }, { now: true }));
+  b.querySelectorAll('[data-mc]').forEach(i => i.onchange = () => cpSave({ settings: { market: { [i.dataset.mc]: i.checked } } }, { now: true }));
+  b.querySelectorAll('[data-chip]').forEach(x => x.onclick = () => {
+    const k = x.dataset.chip, val = x.dataset.val;
+    if (k === 'hook_styles') {
+      let cur = s.hook_styles.includes(val) ? s.hook_styles.filter(h => h !== val) : [...s.hook_styles, val];
+      if (val === AIR && cur.includes(AIR)) cur = [AIR];
+      else if (val !== AIR) cur = cur.filter(h => h !== AIR);
+      return cpSave({ settings: { hook_styles: cur } }, { now: true });
+    }
+    cpSave({ settings: { [k]: val } }, { now: true });
+  });
+  $('#cpPlatDef')?.addEventListener('click', () => cpSave({ settings: { aspect: platDef.aspect, duration: platDef.duration, pace: platDef.pace } }, { now: true }));
+  b.querySelectorAll('[data-dur]').forEach(x => x.onclick = () => cpSave({ settings: { duration: Number(x.dataset.dur) } }, { now: true }));
+  $('#cpDur').onchange = e => cpSave({ settings: { duration: Number(e.target.value) } }, { now: true });
+  b.querySelectorAll('[data-asp]').forEach(x => x.onclick = () => cpSave({ settings: { aspect: x.dataset.asp } }, { now: true }));
+  b.querySelectorAll('[name=cpRes]').forEach(x => x.onchange = () => cpSave({ settings: { resolution: x.value } }, { now: true }));
+  $('#cpHook').onchange = e => cpSave({ settings: { custom_hook: e.target.value } });
+  b.querySelectorAll('[data-cta]').forEach(x => x.onclick = () => cpSave({ settings: { cta: x.dataset.cta } }, { now: true }));
+  $('#cpCta').onchange = e => cpSave({ settings: { cta: e.target.value } });
+  $('#cpAdv').ontoggle = e => { state.cpAdv = e.target.open; };
+  b.querySelectorAll('[data-prod]').forEach(i => i.onchange = () => cpSave({ settings: { production: { [i.dataset.prod]: i.checked } } }, { now: true }));
+  const vars = (patch) => cpSave({ variations: { count: st.variations.count, strategies: st.variations.strategies, distribution: pl.custom ? pl.combos.map(c => ({ key: c.key, count: c.count })) : null, ...patch } }, { now: true });
+  b.querySelectorAll('[data-vc]').forEach(x => x.onclick = () => vars({ count: Number(x.dataset.vc), distribution: null }));
+  $('#cpVc').onchange = e => vars({ count: Number(e.target.value), distribution: null });
+  b.querySelectorAll('[data-vs]').forEach(x => x.onclick = () => {
+    const k = x.dataset.vs, cur = st.variations.strategies;
+    vars({ strategies: cur.includes(k) ? cur.filter(y => y !== k) : [...cur, k], distribution: null });
+  });
+  b.querySelectorAll('[data-dist]').forEach(i => i.onchange = () => vars({ distribution: pl.combos.map((c, k) => ({ key: c.key, count: k === Number(i.dataset.dist) ? Number(i.value) : c.count })) }));
+  $('#cpDistAuto')?.addEventListener('click', () => vars({ distribution: null }));
+}
+
+// Step 6: review
+function cpReview() {
+  const st = state.cp, s = st.settings, m = s.market, v = st.validation, pl = st.plan;
+  const val = (key, labels) => (s[key] === AIR ? (st.recommendations?.[key]?.value ? `✨ ${esc(labels[st.recommendations[key].value])} (AI)` : '✨ AI Recommended (get the recommendations)') : esc(labels[s[key]]));
+  const row = (k, x) => `<div><span>${k}</span><p>${x}</p></div>`;
+  $('#cpBody').innerHTML = `
+    ${v.errors.length ? `<div class="cp-issues">${v.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)} <a data-goto="${e.step}">Fix →</a></div>`).join('')}</div>` : '<div class="cp-issues"><div class="cp-ok">✓ No blocking problem: the Creative Brief can be saved.</div></div>'}
+    ${v.warnings.length ? `<div class="cp-issues">${v.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)} <a data-goto="${w.step}">See →</a></div>`).join('')}</div>` : ''}
+    ${cpRecoCard('review')}
+    <section class="card"><div class="sec-h"><div><h2>📋 Configuration summary</h2><small>This becomes the Creative Brief: the single source for scripts, storyboards, voice-over and editing.</small></div></div>
+      <div class="insp-facts">
+        ${row('Product', `${esc(st.product.name)}`)}
+        ${row('Marketing angles', st.angle_ids.map(id => esc(st.angles.find(a => a.id === id)?.name || id)).join(', ') || '—')}
+        ${row('Footage', `${esc(REG.footageModes[s.footage_mode])} · ${st.footage.used_ids.length} scene(s), silent copies only`)}
+        ${row('Creative types', s.types.map(typeName).join(', ') || '—')}
+        ${row('Market', `${esc(MARKETS?.[m.country]?.name || m.country || '—')} · ${esc(ME.languages[m.language] || m.language)}${m.dialect ? ` (${esc(m.dialect)})` : ''} · ${esc([m.price, m.currency].filter(Boolean).join(' ') || 'no price')}${m.offer ? ` · 🏷 ${esc(m.offer)}` : ''}`)}
+        ${row('Confirmed', [m.cod && 'Cash on delivery', m.free_delivery && 'Free delivery', m.limited_stock && 'Limited stock', m.guarantee && 'Guarantee'].filter(Boolean).join(', ') || 'nothing')}
+        ${row('Platform & format', `${esc(REG.platforms[s.platform]?.name)} · ${s.duration} s · ${s.aspect} · ${s.resolution} (${REG.aspects[s.aspect].sizes[s.resolution].join('×')})`)}
+        ${row('Tone · pace', `${val('tone', REG.tones)} · ${val('pace', REG.paces)}`)}
+        ${row('Hooks', s.hook_styles.map(h => esc(REG.hookStyles[h])).join(', ') + (s.custom_hook ? ` · “${esc(s.custom_hook)}”` : ''))}
+        ${row('Call to action', esc(s.cta || '—'))}
+        ${row('Production', Object.entries(s.production).filter(([, x]) => x).map(([k]) => esc(REG.production[k].label)).join(', ') + ' · original sound: never')}
+        <div class="wide"><span>Variations</span><p>${esc(pl.explanation)}</p><p class="small">${pl.lines.map(esc).join(' · ')}</p></div>
+      </div>
+    </section>
+    <section class="card"><div class="sec-h"><div><h2>🗂 Saved Creative Briefs</h2><small>Each save is a new, frozen version. Product edits never change a saved brief.</small></div>
+      <button class="btn sm" data-view="preview">👁 Preview the brief (JSON)</button></div>
+      ${st.briefs.length ? `<div class="cp-briefs">${st.briefs.map(b => `<div><b>Version ${b.version}</b><span class="muted small">${esc(b.created_at)} · schema ${esc(b.schema_version)}</span><button class="btn sm" data-view="${b.version}">View</button></div>`).join('')}</div>` : '<p class="muted small">No brief saved yet.</p>'}
+    </section>`;
+  cpWireReco();
+  $('#cpBody').querySelectorAll('[data-goto]').forEach(a => a.onclick = () => { location.hash = `project/${st.project.id}/${a.dataset.goto}`; });
+  $('#cpBody').querySelectorAll('[data-view]').forEach(b => b.onclick = async () => {
+    try {
+      const x = b.dataset.view === 'preview' ? await api(`/api/creative-projects/${st.project.id}/brief/preview`) : (await api(`/api/creative-projects/${st.project.id}/brief?version=${b.dataset.view}`)).brief;
+      const m2 = document.createElement('div');
+      m2.className = 'modal';
+      m2.innerHTML = `<div class="modal-card" style="width:min(900px,100%)"><div class="sec-h"><div><h2>${b.dataset.view === 'preview' ? 'Brief preview (not saved)' : `Creative Brief v${b.dataset.view}`}</h2></div><button class="btn sm" data-x>Close</button></div><pre class="cp-json">${esc(JSON.stringify(x, null, 2))}</pre></div>`;
+      m2.onclick = e => { if (e.target === m2 || e.target.dataset.x !== undefined) m2.remove(); };
+      document.body.appendChild(m2);
+    } catch (e) { fail(e); }
+  });
+}
+
+async function cpSaveBrief() {
+  const st = state.cp;
+  await cpFlush();
+  const b = $('#cpBrief'); if (b) { b.disabled = true; b.innerHTML = '<span class="spin sm"></span> Saving…'; }
+  const r = await fetch(`/api/creative-projects/${st.project.id}/brief`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { fail(new Error(j.error || 'Could not save')); state.cp = await api(`/api/creative-projects/${st.project.id}`); return drawProject(true); }
+  state.cp = j.state; toast(`Creative Brief v${j.version} saved`); drawProject(true); refreshSide();
 }
 
 // ---------- Team ----------
