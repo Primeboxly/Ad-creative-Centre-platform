@@ -34,11 +34,11 @@ export function sceneRows(where = '1', params = []) {
 
 export const productScenes = productId => sceneRows('s.product_id = ?', [productId]);
 
-// Exact source of a scene: which stored video and which seconds.
+// Exact source of a scene for editing: the silent copy (no audio stream, checked by ffprobe) and the seconds to use.
 export function sceneSource(sceneId) {
-  const r = db.prepare(`SELECT s.id, s.asset_id, s.start, s.end, s.duration, a.storage_key, a.proxy_key, a.width, a.height, a.fps, a.duration AS video_duration
+  const r = db.prepare(`SELECT s.id, s.asset_id, s.start, s.end, s.duration, a.proxy_key AS silent_key, a.silent, a.width, a.height, a.fps, a.duration AS video_duration
     FROM footage_scenes s JOIN footage_assets a ON a.id = s.asset_id WHERE s.id = ?`).get(sceneId);
-  return r || null;
+  return r ? { ...r, silent: !!r.silent } : null;
 }
 
 // Usable scenes with filters: { placement, categories, angleId, minQuality, minDuration, maxDuration, includeExcluded, favoritesOnly }

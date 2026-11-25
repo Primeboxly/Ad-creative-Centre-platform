@@ -8,9 +8,9 @@ Workflow on each product page, tab **🧠 Strategy**:
    **Import from the product page** reads the link (JSON-LD, meta tags, visible text, pictures; the AI cleans the text when the key is set). The team ticks the pictures to keep and corrects everything before saving.
 2. **Analysis** (AI, from the description and up to 4 pictures): category, summary, features, benefits, problems solved, audiences, pain points, motivations, objections with answers, USPs, emotional triggers, market notes for the target country, and **missing info** (what the AI could not know: nothing is invented).
 3. **Marketing angles**: 8-12 distinct angles (name, description, audience, pain point, main message, emotional trigger, 3 hooks in the target language, recommended creative types, why it could work). Select one or many, edit, add a custom angle, regenerate one or all (selected and edited angles are kept).
-4. **Continue**: the saved angles, kept with the product for the next modules (scripts, storyboards, editing).
+4. **Continue**: the saved angles, kept with the product for the next modules (scripts, storyboards, editing), and matched with the footage scenes (Module 2).
 
-A new product opens directly on this tab. The existing script generator, ElevenLabs voice and music, and video making are unchanged.
+A new product opens directly on this tab (the product tab is called **🎯 Marketing angles**).
 
 ## How it runs
 

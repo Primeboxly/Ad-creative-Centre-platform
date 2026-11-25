@@ -90,11 +90,11 @@
     <!-- Phone: a slim bar with the menu button -->
     <div class="mbar">
       <button class="mbar-btn" id="menuBtn" aria-label="Menu">☰</button>
-      <div class="side-logo" data-go="products"><span class="logo-mark">AC</span><b>Ad creative Centre</b></div>
+      <div class="side-logo" data-go="dashboard"><span class="logo-mark">AC</span><b>Ad creative Centre</b></div>
     </div>
 
     <aside class="side" id="side">
-      <div class="side-logo" data-go="products">
+      <div class="side-logo" data-go="dashboard">
         <span class="logo-mark">AC</span>
         <div><b>Ad creative Centre</b><small>COD ads studio</small></div>
       </div>
@@ -102,8 +102,10 @@
       <button class="side-new" id="sideNew">＋ New product</button>
 
       <nav class="side-nav">
+        <a data-go="dashboard"><span class="ic">🏠</span>Dashboard</a>
         <a data-go="products"><span class="ic">📦</span>Products<em id="cntProducts"></em></a>
-        <a data-go="music"><span class="ic">🎵</span>Music<em id="cntMusic"></em></a>
+        <a data-go="angles"><span class="ic">🎯</span>Marketing angles</a>
+        <a data-go="footage"><span class="ic">🎞</span>Footage library</a>
         <a data-go="team" id="navTeam" class="hidden"><span class="ic">👥</span>Team<em id="cntTeam"></em></a>
       </nav>
 
@@ -126,7 +128,6 @@
     <main id="view"></main>
   </section>
 
-  <div id="buildbar" class="buildbar hidden"></div>
   <script src="/login.js"></script>
   <script src="/app.js" type="module"></script>
 </body>

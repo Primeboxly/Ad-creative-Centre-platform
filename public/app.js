@@ -1,16 +1,10 @@
-// Ad creative Centre: one page app (products → footage, scripts, creatives; team).
+// Ad creative Centre: one page app (dashboard, products with their marketing angles and footage library; team).
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const KIND_HINT = {
-  hook: 'First 2-3 seconds: the scroll-stopper.',
-  body: 'The demo: problem → product → benefits.',
-  cta: 'End: order now, pay on delivery.',
-};
-const STATUS_LABEL = { draft: 'Draft', testing: 'Testing', winner: 'Winner 🏆', loser: 'Loser' };
 const fmtDur = s => { s = Math.round(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 let ME = null;
-const state = { view: 'products', product: null, tab: 'footage', sel: { hook: new Set(), body: new Set(), cta: new Set() }, poll: null };
+const state = { view: 'dashboard', product: null, tab: 'overview', poll: null };
 
 async function api(path, opts = {}) {
   const o = { method: opts.method || 'GET', headers: {} };
@@ -35,7 +29,6 @@ const fail = e => toast(e.message, true);
 let setupMode = false;
 async function showAuth() {
   $('#app').classList.add('hidden');
-  $('#buildbar').classList.add('hidden');
   $('#auth').classList.remove('hidden');
   const { needed } = await api('/api/auth/setup');
   setupMode = needed;
@@ -77,23 +70,21 @@ async function start() {
   state.sidePoll = setInterval(refreshSide, 8000);
 }
 
-// ---------- Sidebar: counts, recent products, ads being made ----------
+// ---------- Sidebar: counts, recent products, footage being processed ----------
 async function refreshSide() {
   if ($('#app').classList.contains('hidden')) return;
   const s = await api('/api/sidebar').catch(() => null);
   if (!s) return;
   const cnt = (id, n) => { $(id).textContent = n ? String(n) : ''; };
-  cnt('#cntProducts', s.products); cnt('#cntMusic', s.music); cnt('#cntTeam', s.team);
+  cnt('#cntProducts', s.products); cnt('#cntTeam', s.team);
   const cur = (location.hash.match(/^#product\/(\d+)/) || [])[1];
   $('#sideRecent').innerHTML = s.recent.map(p => `<a class="side-p ${String(p.id) === cur ? 'on' : ''}" href="#product/${p.id}">
-      ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty">🎬</span>'}<span>${esc(p.name)}</span>
-      ${p.making ? `<i class="dot" title="${p.making} ads being made"></i>` : ''}</a>`).join('')
+      ${productPic(p) ? `<img src="${productPic(p)}" alt="">` : '<span class="pimg-empty">🎬</span>'}<span>${esc(p.name)}</span></a>`).join('')
     || '<div class="side-empty">No product yet</div>';
-  const making = s.making + s.cutting;
-  $('#live').innerHTML = making
-    ? `<div class="live-on"><span class="pulse"></span><div><b>${s.making ? `${s.making} ad${s.making > 1 ? 's' : ''} being made` : ''}${s.making && s.cutting ? ' · ' : ''}${s.cutting ? `${s.cutting} video${s.cutting > 1 ? 's' : ''} being cut` : ''}</b>
+  $('#live').innerHTML = s.processing
+    ? `<div class="live-on"><span class="pulse"></span><div><b>${s.processing} video${s.processing > 1 ? 's' : ''} being processed</b>
         <small>Running in the background</small></div></div>`
-    : `<div class="live-off">✅ All ads are ready${s.ready ? ` · <b>${s.ready}</b> made` : ''}</div>`;
+    : '<div class="live-off">✅ No footage waiting</div>';
 }
 
 // Phone: open/close the sidebar
@@ -103,17 +94,17 @@ $('#sideNew').addEventListener('click', () => { location.hash = 'products'; stat
 
 function route() {
   clearInterval(state.poll);
-  $('#buildbar').classList.add('hidden');
-  closeStudio();
   document.body.classList.remove('side-open');
-  const [view, id, tab] = (location.hash.slice(1) || 'products').split('/');
-  document.querySelectorAll('.side-nav a').forEach(a => a.classList.toggle('on', a.dataset.go === view || (view === 'product' && a.dataset.go === 'products')));
+  const [view, id, tab] = (location.hash.slice(1) || 'dashboard').split('/');
+  const nav = view === 'product' ? (tab === 'strategy' ? 'angles' : tab === 'footage' ? 'footage' : 'products') : view;
+  document.querySelectorAll('.side-nav a').forEach(a => a.classList.toggle('on', a.dataset.go === nav));
   document.querySelectorAll('.side-p').forEach(a => a.classList.toggle('on', view === 'product' && a.getAttribute('href') === `#product/${id}`));
-  state.music = null; // reload the music list for the Build bar
   if (view === 'team' && ME.user.role === 'admin') return renderTeam();
-  if (view === 'music') return renderMusic();
-  if (view === 'product' && id) { state.tab = tab || 'overview'; return renderProduct(Number(id)); }
-  renderProducts();
+  if (view === 'product' && id) { state.tab = TABS.some(([k]) => k === tab) ? tab : 'overview'; return renderProduct(Number(id)); }
+  if (view === 'products') return renderProducts();
+  if (view === 'angles') return renderHub('angles');
+  if (view === 'footage') return renderHub('footage');
+  renderDashboard();
 }
 
 // ---------- Products ----------
@@ -122,12 +113,14 @@ let MARKETS = null;
 const loadMarkets = async () => (MARKETS ??= await api('/api/markets').catch(() => ({})));
 const flag = (code, size = '') => `<span class="flag f-${esc(code)} ${size}" title="${esc(MARKETS?.[code]?.name || code)}"></span>`;
 const marketBadges = (list = []) => list.map(m => `<span class="mkf">${flag(m.code)}${esc(m.code)}</span>`).join('');
-const productPic = p => (p.image ? `/media/product/${p.id}/image?v=${encodeURIComponent(p.image)}` : p.cover_clip ? `/media/thumb/clip/${p.cover_clip}` : '');
+const productPic = p => (p.image ? `/media/product/${p.id}/image?v=${encodeURIComponent(p.image)}` : '');
 const ago = iso => {
   if (!iso) return '';
   const d = (Date.now() - new Date(iso.replace(' ', 'T') + 'Z')) / 864e5;
   return d < 1 ? 'today' : d < 2 ? 'yesterday' : d < 30 ? `${Math.floor(d)} days ago` : iso.slice(0, 10);
 };
+
+const ANALYSIS_LABEL = { done: '✅ Analysed', running: '⏳ Analysing…', failed: '⚠ Failed' };
 
 async function renderProducts() {
   const v = $('#view');
@@ -147,17 +140,8 @@ async function renderProducts() {
       <div class="row" style="margin-top:12px"><button class="btn primary">Create</button><button type="button" class="btn" id="cancelNew">Cancel</button></div>
     </form>
     <div class="plist card">
-      <div class="prow phead"><div>Product</div><div>Status</div><div>Markets</div><div>Footage</div><div>Scripts</div><div>Ads</div><div>Activity</div></div>
-      ${shown.map(p => `
-        <a class="prow" href="#product/${p.id}">
-          <div class="pname">${productPic(p) ? `<img src="${productPic(p)}" alt="" loading="lazy">` : '<span class="pimg-empty">🎬</span>'}<b>${esc(p.name)}</b></div>
-          <div><span class="pst st-${p.status}">${P_STATUS[p.status] || esc(p.status)}</span></div>
-          <div class="mks">${marketBadges(p.markets) || '<span class="muted small">–</span>'}</div>
-          <div class="small">${p.hooks + p.bodies + p.ctas ? `🎞 ${p.hooks + p.bodies + p.ctas} clips` : '<span class="muted">–</span>'}</div>
-          <div>${p.scripts || '<span class="muted">–</span>'}</div>
-          <div>${p.creatives ? `${p.creatives}${p.winners ? ` <span class="chip win">🏆 ${p.winners}</span>` : ''}` : '<span class="muted">–</span>'}</div>
-          <div class="muted small">${ago(p.last_activity)}</div>
-        </a>`).join('')}
+      <div class="prow phead"><div>Product</div><div>Status</div><div>Markets</div><div>Analysis</div><div>Angles</div><div>Footage</div><div>Activity</div></div>
+      ${shown.map(productRow).join('')}
       ${shown.length ? '' : `<div class="empty">${list.length ? 'No product matches.' : 'No product yet. Click <b>+ New product</b>.'}</div>`}
     </div>`;
   $('#newProduct').onclick = () => { $('#newForm').classList.remove('hidden'); $('#newForm [name=name]').focus(); };
@@ -177,28 +161,24 @@ async function renderProducts() {
 // ---------- One product ----------
 async function loadProduct(id) {
   state.data = await api(`/api/products/${id}`);
-  if (state.product !== id) { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; state.product = id; }
-  // Forget selected clips that were deleted.
-  const ids = new Set(state.data.clips.map(c => c.id));
-  for (const k in state.sel) for (const x of state.sel[k]) if (!ids.has(x)) state.sel[k].delete(x);
+  state.product = id;
 }
 
 // The source link is Alibaba, 1688 or Amazon: its icon and name follow the link.
 const sourceIcon = u => (/amazon./i.test(u || '') ? '📦' : '🏭');
 const sourceName = u => (/amazon./i.test(u || '') ? 'Amazon' : /1688.com/i.test(u || '') ? '1688' : /alibaba./i.test(u || '') ? 'Alibaba' : 'Alibaba / 1688 / Amazon');
 
-const TABS = [['overview', '✦ Overview'], ['strategy', '🧠 Strategy'], ['footage', '🎞 Footage'], ['scripts', '📝 Scripts'], ['creatives', '🎬 Creatives'], ['inspiration', '✨ Inspiration']];
+const TABS = [['overview', '✦ Overview'], ['strategy', '🎯 Marketing angles'], ['footage', '🎞 Footage library']];
 
-// Where the product is on its way to a winning ad.
+// Where the product is: information → analysis → angles chosen → footage → scenes analysed.
 function productSteps() {
-  const { clips, scripts, creatives } = state.data;
-  const ready = creatives.filter(c => c.render === 'ready');
+  const { product: p, counts: c } = state.data;
   const steps = [
-    { k: 'footage', ic: '🎞', t: 'Footage', d: clips.length ? `${clips.length} clips` : 'Drop your TikToks', done: clips.length > 0 },
-    { k: 'scripts', ic: '📝', t: 'Scripts', d: scripts.length ? `${scripts.length} written` : 'Write with AI', done: scripts.length > 0 },
-    { k: 'creatives', ic: '🎙', t: 'Voice & music', d: creatives.some(c => c.voice_id) ? 'Voice-over on' : 'Choose a voice', done: creatives.some(c => c.voice_id) },
-    { k: 'creatives', ic: '🎬', t: 'Ads made', d: ready.length ? `${ready.length} ready` : 'Create ads', done: ready.length > 0 },
-    { k: 'creatives', ic: '🏆', t: 'Winner', d: creatives.some(c => c.status === 'winner') ? `${creatives.filter(c => c.status === 'winner').length} found` : 'Test & pick', done: creatives.some(c => c.status === 'winner') },
+    { k: 'strategy', ic: '📦', t: 'Product info', d: p.description ? 'Description ready' : 'Add a description', done: Boolean(p.description) },
+    { k: 'strategy', ic: '🧠', t: 'Analysis', d: c.analysed ? 'Done' : 'Analyse with AI', done: c.analysed > 0 },
+    { k: 'strategy', ic: '🎯', t: 'Angles', d: c.selected_angles ? `${c.selected_angles} chosen` : c.angles ? `${c.angles} to choose from` : 'Generate angles', done: c.selected_angles > 0 },
+    { k: 'footage', ic: '🎞', t: 'Footage', d: c.videos ? `${c.videos} video${c.videos > 1 ? 's' : ''}` : 'Upload videos', done: c.videos > 0 },
+    { k: 'footage', ic: '✨', t: 'Scenes', d: c.analysed_scenes ? `${c.analysed_scenes} analysed` : 'Analysed by AI', done: c.analysed_scenes > 0 },
   ];
   const cur = steps.findIndex(s => !s.done);
   return steps.map((s, i) => ({ ...s, cur: i === cur }));
@@ -206,11 +186,9 @@ function productSteps() {
 
 async function renderProduct(id) {
   try { await Promise.all([loadProduct(id), loadMarkets()]); } catch (e) { fail(e); location.hash = 'products'; return; }
-  const { product: p, clips, scripts, creatives, inspirations } = state.data;
-  const pic = productPic({ ...p, cover_clip: clips[0]?.id });
-  const counts = { footage: clips.length, scripts: scripts.length, creatives: creatives.length, inspiration: inspirations.length };
-  const n = k => clips.filter(c => c.kind === k).length;
-  const winners = creatives.filter(c => c.status === 'winner').length;
+  const { product: p, counts: c } = state.data;
+  const pic = productPic(p);
+  const counts = { strategy: c.angles, footage: c.videos };
   const link = (url, ic, label) => (url ? `<a class="glass-chip" href="${esc(url)}" target="_blank" rel="noopener">${ic} ${label} <i>↗</i></a>` : '');
   const steps = productSteps();
   const v = $('#view');
@@ -234,7 +212,6 @@ async function renderProduct(id) {
           <div class="hero2-by">Added ${esc(p.created_at.slice(0, 10))}${state.data.author ? ` by ${esc(state.data.author)}` : ''}</div>
         </div>
         <div class="hero2-actions">
-          <button class="btn primary big" id="pCreate">🎬 Create ads</button>
           <div class="row" style="gap:6px;justify-content:flex-end">
             <button class="glass-btn" id="pEdit">✏️ Edit</button>
             ${ME.user.role === 'admin' ? '<button class="glass-btn danger" id="delProduct" title="Delete product">🗑</button>' : ''}
@@ -242,10 +219,10 @@ async function renderProduct(id) {
         </div>
       </div>
       <div class="hero2-stats">
-        <div><b>${clips.length}</b><span>🎞 Clips</span></div>
-        <div><b>${scripts.length}</b><span>📝 Scripts</span></div>
-        <div><b>${creatives.length}</b><span>🎬 Ads</span></div>
-        <div class="${winners ? 'win' : ''}"><b>${winners}</b><span>🏆 Winners</span></div>
+        <div><b>${c.angles}</b><span>🎯 Angles</span></div>
+        <div class="${c.selected_angles ? 'win' : ''}"><b>${c.selected_angles}</b><span>✅ Chosen</span></div>
+        <div><b>${c.videos}</b><span>🎞 Videos</span></div>
+        <div><b>${c.scenes}</b><span>✨ Scenes</span></div>
       </div>
     </section>
 
@@ -266,27 +243,17 @@ async function renderProduct(id) {
   };
   $('#pEdit').onclick = () => editProduct(p);
   $('#addLinks')?.addEventListener('click', () => editProduct(p));
-  $('#pCreate').onclick = () => {
-    // Tick every clip and open the studio.
-    state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
-    clips.forEach(c => state.sel[c.kind].add(c.id));
-    if (!clips.length) { location.hash = `product/${id}/footage`; return toast('Add footage first: drop your TikToks in Auto-split'); }
-    state.ftab = 'clips';
-    if (state.tab !== 'footage') { location.hash = `product/${id}/footage`; setTimeout(openStudio, 400); } else { renderFootage(); openStudio(); }
-  };
   const del = $('#delProduct');
   if (del) del.onclick = async () => {
-    if (!confirm(`Delete "${p.name}" with all its footage, scripts, videos and inspiration? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${p.name}" with its analysis, marketing angles, videos and scenes? This cannot be undone.`)) return;
     try { await api(`/api/products/${id}`, { method: 'DELETE' }); location.hash = 'products'; refreshSide(); } catch (e) { fail(e); }
   };
-  ({ overview: renderOverview, strategy: renderStrategy, footage: renderFootage, scripts: renderScripts, creatives: renderCreatives, inspiration: renderInspiration }[state.tab] || renderOverview)();
+  ({ overview: renderOverview, strategy: renderStrategy, footage: renderFootage }[state.tab] || renderOverview)();
 }
 
-// Overview: latest ads, brief, what the AI knows, markets, inspiration.
+// Overview: marketing angles and footage at a glance, links, markets, what the AI knows.
 function renderOverview() {
-  const { product: p, scripts, creatives, inspirations } = state.data;
-  const ready = creatives.filter(c => c.render === 'ready');
-  const making = creatives.filter(c => c.render === 'queued' || c.render === 'rendering').length;
+  const { product: p, counts: c } = state.data;
   const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
   // Each link tile can be filled or changed right where it is (click ＋ or ✏️, paste, Enter).
   const tile = (u, ic, title, color, key) => `<div class="ltile-wrap" data-link="${key}">${u
@@ -299,15 +266,13 @@ function renderOverview() {
   const total = p.markets.length;
   $('#tab').innerHTML = `
     <div class="ov2">
-      <section class="card ov2-ads">
-        <div class="sec-h"><div><h2>🎬 Latest ads</h2><small>${ready.length} ready${making ? ` · <b class="making">${making} being made</b>` : ''}</small></div>
-          <a class="sec-link" href="#product/${p.id}/creatives">See all ${creatives.length} →</a></div>
-        <div class="reel">
-          ${ready.slice(0, 8).map(c => `<a class="reel-card" href="#product/${p.id}/creatives">
-            <video muted loop playsinline preload="none" poster="/media/thumb/creative/${c.id}" data-src="/media/creative/${c.id}"></video>
-            <span class="reel-st ${c.status}">${STATUS_LABEL[c.status]}</span><span class="reel-play">▶</span>
-            <span class="reel-name">${esc(c.style === 'bss' ? 'BSS montage' : 'Classic')} · ${fmtDur(c.duration)}</span></a>`).join('')}
-          <button class="reel-card add" id="ovCreate"><span>＋</span><b>Create ads</b><small>from the footage</small></button>
+      <section class="card">
+        <div class="sec-h"><div><h2>📌 This product</h2><small>Marketing angles and footage library</small></div></div>
+        <div class="ltiles">
+          <a class="ltile" href="#product/${p.id}/strategy"><span class="lt-ic" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">🎯</span>
+            <div><b>Marketing angles</b><small>${c.analysed ? 'Analysed' : 'Not analysed yet'} · ${c.angles} angle${c.angles === 1 ? '' : 's'} · ${c.selected_angles} chosen</small></div><i>→</i></a>
+          <a class="ltile" href="#product/${p.id}/footage"><span class="lt-ic" style="background:linear-gradient(135deg,#0ea5e9,#22d3ee)">🎞</span>
+            <div><b>Footage library</b><small>${c.videos} video${c.videos === 1 ? '' : 's'} · ${c.analysed_scenes}/${c.scenes} scenes analysed · ${c.favorites} ★</small></div><i>→</i></a>
         </div>
       </section>
 
@@ -329,28 +294,15 @@ function renderOverview() {
       </div>
 
       <section class="card ai-card">
-        <div class="sec-h"><div><h2>🤖 What the AI knows</h2><small>Used for every script: benefits, buyers, price, offer, tone</small></div>
+        <div class="sec-h"><div><h2>🤖 What the AI knows</h2><small>Given to the AI with the description: benefits, buyers, price, offer, tone</small></div>
           <span class="ai-count" id="ovCount">${p.notes.length} chars</span></div>
         <textarea id="ovNotes" placeholder="e.g. Crystal bracelet, gold finish, a gift for her. 780 ZMW, buy 2 get the 3rd free. Pay on delivery, 24-72 h.">${esc(p.notes)}</textarea>
         <div class="ai-foot">
-          <div class="ai-meta">
-            <span class="ai-pill">📣 Banner: ${esc(p.banner || 'Pay on delivery')}</span>
-            ${p.music_style ? `<span class="ai-pill">🎵 ${esc(p.music_style.slice(0, 60))}${p.music_style.length > 60 ? '…' : ''}</span>` : ''}
-            <span class="ai-pill">📝 ${scripts.length} script${scripts.length === 1 ? '' : 's'}</span>
-          </div>
+          <div class="ai-meta"></div>
           <button class="btn primary" id="ovSave">Save</button>
         </div>
       </section>
 
-      <section class="card">
-        <div class="sec-h"><div><h2>✨ Inspiration</h2><small>Ads and screenshots whose style the team copies</small></div>
-          <a class="sec-link" href="#product/${p.id}/inspiration">${inspirations.length ? `All ${inspirations.length} →` : 'Open →'}</a></div>
-        <div class="insp-row">
-          ${inspirations.slice(0, 6).map(i => `<a class="insp-mini" href="#product/${p.id}/inspiration">
-            <img src="${i.kind === 'image' ? `/media/inspiration/${i.id}` : `/media/thumb/insp/${i.id}`}" alt="" loading="lazy">${i.kind === 'video' ? '<span class="reel-play">▶</span>' : ''}</a>`).join('')}
-          <a class="insp-mini add" href="#product/${p.id}/inspiration"><span>＋</span><small>Add</small></a>
-        </div>
-      </section>
     </div>`;
   $('#tab').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editProduct(p));
   $('#tab').querySelectorAll('[data-link]').forEach(w => {
@@ -369,16 +321,9 @@ function renderOverview() {
       } catch (err) { fail(err); }
     };
   });
-  $('#ovCreate').onclick = () => $('#pCreate').click();
   const notes = $('#ovNotes');
   notes.oninput = () => { $('#ovCount').textContent = `${notes.value.length} chars`; };
   $('#ovSave').onclick = () => api(`/api/products/${p.id}`, { method: 'PATCH', body: { notes: notes.value } }).then(() => toast('Saved'), fail);
-  // Ads play when the mouse is on them.
-  $('#tab').querySelectorAll('.reel-card video').forEach(vd => {
-    const card = vd.closest('.reel-card');
-    card.onmouseenter = () => { if (!vd.src) vd.src = vd.dataset.src; vd.play().catch(() => {}); };
-    card.onmouseleave = () => vd.pause();
-  });
 }
 
 
@@ -740,8 +685,8 @@ function drawContinueStep() {
   const chosen = state.strat.angles.filter(a => a.selected);
   $('#stratBody').innerHTML = chosen.length ? `
     <div class="card cont-hero"><div class="cont-ic">🚀</div><div><h2>${chosen.length} marketing angle${chosen.length > 1 ? 's' : ''} saved</h2>
-      <p class="muted">They are kept with the product for the next steps: scripts, storyboards and video editing.</p></div>
-      <div class="row"><button class="btn" id="ctBack">← Change the selection</button><a class="btn primary big" href="#product/${state.product}/scripts">Continue to scripts →</a></div></div>
+      <p class="muted">They are kept with the product, and the footage scenes are matched with them.</p></div>
+      <div class="row"><button class="btn" id="ctBack">← Change the selection</button><a class="btn primary big" href="#product/${state.product}/footage">Go to the footage library →</a></div></div>
     <div class="cont-list">${chosen.map((a, i) => `<div class="cont-item"><span>${i + 1}</span><div><b>${esc(a.name)}</b><small>“${esc(a.message)}”</small>
       <div class="cont-hooks">${a.hooks.map(h => `<em>${esc(h)}</em>`).join('')}</div></div></div>`).join('')}</div>`
     : `<div class="card s-empty"><div class="s-empty-ic">🎯</div><h2>No angle saved yet</h2><p class="muted">Select angles in step 3 and save them.</p>
@@ -749,7 +694,7 @@ function drawContinueStep() {
   $('#ctBack').onclick = () => { state.stratStep = 'angles'; drawStrategy(); };
 }
 
-// Edit product: a live preview on the left (picture, name, status, markets, CTA banner), the form on the right.
+// Edit product: a live preview on the left (picture, name, status, markets), the form on the right.
 const REGIONS = [
   ['Southern Africa', ['ZM', 'ZW', 'MW', 'MZ', 'BW', 'NA']],
   ['East Africa', ['KE', 'TZ', 'UG', 'RW']],
@@ -757,9 +702,9 @@ const REGIONS = [
   ['North Africa', ['MA']],
 ];
 function editProduct(p) {
-  const draft = { name: p.name, status: p.status, banner: p.banner, link_product: p.link_product, link_alibaba: p.link_alibaba,
+  const draft = { name: p.name, status: p.status, link_product: p.link_product, link_alibaba: p.link_alibaba,
     markets: p.markets.map(m => ({ ...m })) };
-  const pic = productPic({ ...p, cover_clip: state.data?.clips?.[0]?.id });
+  const pic = productPic(p);
   const m = document.createElement('div');
   m.className = 'studio-wrap center';
   document.body.appendChild(m);
@@ -774,7 +719,6 @@ function editProduct(p) {
     $('#pePrevStatus').innerHTML = `<span class="pst st-${draft.status}">${P_STATUS[draft.status]}</span>`;
     $('#pePrevMk').innerHTML = draft.markets.map(x => `<span class="mkf dark">${flag(x.code)}${esc(x.code)}${x.price ? ` · ${esc(x.price)} ${esc(MARKETS[x.code]?.currency || '')}` : ''}</span>`).join('')
       || '<span class="small" style="color:#8e92a0">No market yet</span>';
-    $('#pePrevBanner').textContent = draft.banner || 'PAY ON DELIVERY';
   }
   function prices() {
     $('#pePrices').innerHTML = draft.markets.map(x => `<div class="price-row">${flag(x.code, 'lg')}<b>${esc(MARKETS[x.code]?.name || x.code)}</b>
@@ -794,8 +738,6 @@ function editProduct(p) {
       <div id="pePrevStatus"></div>
       <div class="pe-name" id="pePrevName"></div>
       <div class="pe-mk" id="pePrevMk"></div>
-      <h3>Banner on the videos</h3>
-      <div class="pe-banner"><span id="pePrevBanner"></span><small>last seconds of each ad</small></div>
     </aside>
 
     <div class="pe-form">
@@ -826,11 +768,6 @@ function editProduct(p) {
           <div class="prices" id="pePrices"></div>
         </section>
 
-        <section class="pe-sec">
-          <h4><span class="ic">📣</span>Order banner on videos</h4>
-          <div class="field"><span class="fi">🟧</span><input type="text" data-k="banner" maxlength="60" value="${esc(draft.banner)}" placeholder="PAY ON DELIVERY · 680 ZMW"></div>
-          <p class="small muted" style="margin:6px 0 0">Shown at the end of Classic ads. Empty = "Pay on delivery" in the script's language.</p>
-        </section>
       </div>
       <div class="pe-foot"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary big">Save changes</button></div>
     </div>
@@ -882,612 +819,6 @@ function editProduct(p) {
 }
 
 
-// Inspiration: ads and screenshots the team wants to copy the style of.
-function renderInspiration() {
-  const { inspirations } = state.data;
-  const t = $('#tab');
-  t.innerHTML = `
-    <div class="card">
-      <h2>✨ Inspiration</h2>
-      <p class="muted small" style="margin-top:-4px">Ads that work, competitors' videos, screenshots: the style you want for this product's ads.</p>
-      <div class="drop" id="inspDrop">⬆ Drop videos or pictures here or click to upload<input type="file" accept="video/*,image/*" multiple class="hidden"></div>
-      <div class="progress hidden"><div></div></div>
-    </div>
-    <div class="insp-grid">
-      ${inspirations.map(i => `<div class="card insp" data-id="${i.id}">
-        <div class="insp-media">${i.kind === 'image' ? `<img src="/media/inspiration/${i.id}" alt="" loading="lazy" data-zoom>`
-          : `<video src="/media/inspiration/${i.id}" poster="/media/thumb/insp/${i.id}" controls preload="none" playsinline></video>`}</div>
-        <input type="text" value="${esc(i.name)}" data-name>
-        <textarea data-note placeholder="What do you like in it? (opening, captions, music, angle…)">${esc(i.note)}</textarea>
-        <div class="row spread"><span class="small muted">${i.kind === 'video' ? `🎬 ${fmtDur(i.duration)}` : '🖼 picture'} · ${esc(i.author || '')}</span>
-          <button class="btn sm danger" data-del>✕</button></div>
-      </div>`).join('')}
-    </div>
-    ${inspirations.length ? '' : '<div class="empty">Nothing yet. Drop the ads you want to copy.</div>'}`;
-  const d = $('#inspDrop'), input = $('input', d);
-  const send = files => upload(`/api/products/${state.product}/inspiration`, {}, files, d, r => `${r.added} added`);
-  d.onclick = e => { if (e.target !== input) input.click(); };
-  input.onchange = () => send(input.files);
-  d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
-  d.ondragleave = () => d.classList.remove('over');
-  d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); send(e.dataTransfer.files); };
-  t.querySelectorAll('.insp').forEach(el => {
-    const id = Number(el.dataset.id);
-    $('[data-name]', el).onchange = e => api(`/api/inspirations/${id}`, { method: 'PATCH', body: { name: e.target.value } }).catch(fail);
-    $('[data-note]', el).onchange = e => api(`/api/inspirations/${id}`, { method: 'PATCH', body: { note: e.target.value } }).then(() => toast('Saved'), fail);
-    $('[data-del]', el).onclick = () => { if (confirm('Delete this inspiration?')) api(`/api/inspirations/${id}`, { method: 'DELETE' }).then(() => renderProduct(state.product), fail); };
-    const z = $('[data-zoom]', el);
-    if (z) z.onclick = () => { const m = document.createElement('div'); m.className = 'modal'; m.innerHTML = `<img src="${z.src}" style="max-width:92vw;max-height:88vh;border-radius:10px">`; m.onclick = () => m.remove(); document.body.appendChild(m); };
-  });
-}
-
-
-// Footage: drop videos, the platform cuts them into clips (and knows each clip's role in the ad by itself).
-// The clips are shown per source video; tick clips, then Create ads.
-const RAW_STATE = { queued: '⏳ Waiting', splitting: '✂️ Cutting…', done: '✅ Ready', failed: '❌ Failed' };
-const ROLE_ORDER = { hook: 0, body: 1, cta: 2 };
-const isSel = c => state.sel[c.kind]?.has(c.id);
-const selCount = () => state.sel.hook.size + state.sel.body.size + state.sel.cta.size;
-
-function renderClipsTab() {
-  const { clips, raws } = state.data;
-  // Clips grouped by the video they were cut from, in the order they play.
-  const groups = [];
-  for (const c of [...clips].sort((a, b) => a.original_name.localeCompare(b.original_name) || ROLE_ORDER[a.kind] - ROLE_ORDER[b.kind] || a.id - b.id)) {
-    const g = groups.find(x => x.name === c.original_name);
-    g ? g.clips.push(c) : groups.push({ name: c.original_name, clips: [c] });
-  }
-  const t = $('#ftabBody');
-  t.innerHTML = `
-    <div class="card autosplit">
-      <h2>✂️ Clips for the ad maker</h2>
-      <div class="hint">The current ad maker uses these clips. Drop videos here, or send a video from the library (✂️ To ad maker): each one is cut into clips on its scene changes.</div>
-      <div class="drop" data-raw>⬆ Drop videos here or click to upload<input type="file" accept="video/*" multiple class="hidden"></div>
-      <div class="progress hidden"><div></div></div>
-      ${raws.length ? `<div class="raws">${raws.map(r => `
-        <div class="raw" data-id="${r.id}">
-          <span class="rname">${esc(r.original_name)}</span>
-          <span class="rstate ${r.status}">${RAW_STATE[r.status]}${r.status === 'done' ? ` · ${r.parts} clips` : ''}</span>
-          ${r.status === 'failed' ? `<span class="small muted">${esc(r.error).slice(0, 120)}</span><button class="btn sm" data-rretry>Try again</button>` : ''}
-          ${r.status === 'failed' || r.status === 'queued' ? '<button class="btn sm danger" data-rdel>✕</button>' : ''}
-        </div>`).join('')}</div>` : ''}
-    </div>
-
-    ${clips.length ? `
-    <div class="lib-tools">
-      <div><h2>Clips <small>${clips.length}</small></h2><span class="muted small">From ${groups.length} video${groups.length === 1 ? '' : 's'} · tick the clips to use, then Create ads</span></div>
-      <button class="btn" id="selAll">${selCount() === clips.length ? 'Unselect all' : 'Select all'}</button>
-    </div>
-    ${groups.map(g => `
-      <section class="vgroup">
-        <div class="vgroup-h"><b>🎬 ${esc(g.name.replace(/\.[^.]+$/, ''))}</b><span class="muted small">${g.clips.length} clips · ${fmtDur(g.clips.reduce((s, c) => s + c.duration, 0))}</span>
-          <button class="btn sm" data-gsel="${esc(g.name)}">${g.clips.every(isSel) ? 'Unselect' : 'Select'}</button></div>
-        <div class="clips">
-          ${g.clips.map(c => `
-            <div class="clip ${isSel(c) ? 'sel' : ''}" data-id="${c.id}">
-              <input type="checkbox" class="tick" ${isSel(c) ? 'checked' : ''}>
-              <span class="dur">${fmtDur(c.duration)}${c.has_audio ? '' : ' 🔇'}</span>
-              <img src="/media/thumb/clip/${c.id}" alt="" data-play="/media/clip/${c.id}" loading="lazy">
-              <button class="clip-del" data-del title="Delete this clip">✕</button>
-            </div>`).join('')}
-        </div>
-      </section>`).join('')}`
-    : '<div class="empty card">No clip yet. Drop your videos above.</div>'}`;
-
-  t.querySelectorAll('.drop').forEach(d => {
-    const input = $('input', d);
-    d.onclick = e => { if (e.target !== input) input.click(); };
-    input.onchange = () => uploadRaw(input.files, d);
-    d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
-    d.ondragleave = () => d.classList.remove('over');
-    d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); uploadRaw(e.dataTransfer.files, d); };
-  });
-  t.querySelectorAll('.raw').forEach(el => {
-    const id = Number(el.dataset.id);
-    const rt = $('[data-rretry]', el), rd = $('[data-rdel]', el);
-    if (rt) rt.onclick = () => api(`/api/raws/${id}/retry`, { method: 'POST' }).then(() => renderProduct(state.product), fail);
-    if (rd) rd.onclick = () => api(`/api/raws/${id}`, { method: 'DELETE' }).then(() => renderProduct(state.product), fail);
-  });
-  // While videos are being cut, check every 3 seconds and show the new clips.
-  clearInterval(state.poll);
-  if (raws.some(r => r.status === 'queued' || r.status === 'splitting')) {
-    state.poll = setInterval(async () => {
-      if (state.tab !== 'footage' || !location.hash.startsWith(`#product/${state.product}`)) return clearInterval(state.poll);
-      const before = JSON.stringify(state.data.raws.map(r => r.status));
-      await loadProduct(state.product).catch(() => {});
-      if (JSON.stringify(state.data.raws.map(r => r.status)) !== before) renderProduct(state.product);
-    }, 3000);
-  }
-  const setSel = (list, on) => list.forEach(c => (on ? state.sel[c.kind].add(c.id) : state.sel[c.kind].delete(c.id)));
-  $('#selAll')?.addEventListener('click', () => { setSel(clips, selCount() !== clips.length); renderClipsTab(); });
-  t.querySelectorAll('[data-gsel]').forEach(b => b.onclick = () => {
-    const g = groups.find(x => x.name === b.dataset.gsel);
-    setSel(g.clips, !g.clips.every(isSel));
-    renderClipsTab();
-  });
-  t.querySelectorAll('.clip').forEach(el => {
-    const c = clips.find(x => x.id === Number(el.dataset.id));
-    $('.tick', el).onchange = e => { setSel([c], e.target.checked); renderClipsTab(); };
-    $('[data-del]', el).onclick = async () => {
-      if (!confirm('Delete this clip?')) return;
-      try { await api(`/api/clips/${c.id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
-    };
-  });
-  t.querySelectorAll('[data-play]').forEach(img => img.onclick = () => play(img.dataset.play));
-  renderBuildBar();
-}
-
-function uploadRaw(files, drop) { upload(`/api/products/${state.product}/raw`, {}, files, drop, r => `${r.queued} video(s) are being cut into clips`); }
-
-
-function upload(url, fields, files, drop, okMsg, isWarn = () => false, done = () => renderProduct(state.product)) {
-  if (!files?.length) return;
-  const fd = new FormData();
-  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-  for (const f of files) fd.append('files', f);
-  const bar = drop.nextElementSibling;
-  bar.classList.remove('hidden');
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', url);
-  xhr.upload.onprogress = e => { if (e.lengthComputable) $('div', bar).style.width = `${(e.loaded / e.total) * 100}%`; };
-  xhr.onload = () => {
-    const r = JSON.parse(xhr.responseText || '{}');
-    if (xhr.status >= 300) return fail(new Error(r.error || 'Upload failed')), bar.classList.add('hidden');
-    toast(okMsg(r), isWarn(r));
-    done();
-  };
-  xhr.onerror = () => { fail(new Error('Upload failed: check your connection')); bar.classList.add('hidden'); };
-  xhr.send(fd);
-}
-
-// ---------- Create-ads studio ----------
-// Ticking clips shows a big "Create ads" button; it opens the studio, where every choice is a large card.
-// Choices are remembered in this browser (scripts are remembered per product).
-const build = Object.assign({ style: 'bss', format: '4x5', voice: '', voiceName: '', music: 'product', captions: true },
-  JSON.parse(localStorage.getItem('acc-build') || '{}'));
-const saveBuild = () => localStorage.setItem('acc-build', JSON.stringify(build));
-
-// Voices (ElevenLabs) and music tracks, loaded once when the studio first needs them.
-async function loadBuildLists() {
-  if (!state.music) state.music = await api('/api/music').catch(() => []);
-  if (ME.tts && !state.voices) {
-    state.voicesError = '';
-    state.voices = await api('/api/voices').catch(e => { state.voicesError = e.message; return []; });
-  }
-}
-
-// Scripts ticked in the studio (kept per product, only ones that still exist).
-function chosenScripts() {
-  const ids = new Set(state.data.scripts.map(s => s.id));
-  state.studioScripts ??= {};
-  const mine = (state.studioScripts[state.product] || []).filter(id => ids.has(id));
-  state.studioScripts[state.product] = mine;
-  return mine;
-}
-
-// The floating button on the Footage tab.
-function renderBuildBar() {
-  const bb = $('#buildbar');
-  const n = k => state.sel[k].size;
-  if (state.tab !== 'footage' || n('hook') + n('body') + n('cta') === 0) return bb.classList.add('hidden');
-  bb.classList.remove('hidden');
-  bb.innerHTML = `<div class="fab">
-    <div class="fab-sel"><span class="chip">🎞 ${selCount()} clips selected</span></div>
-    <button class="btn sm ghost" id="bbClear">Clear</button>
-    <button class="btn primary big" id="bbOpen">🎬 Create ads →</button>
-  </div>`;
-  $('#bbClear').onclick = () => { state.sel = { hook: new Set(), body: new Set(), cta: new Set() }; renderFootage(); };
-  $('#bbOpen').onclick = openStudio;
-}
-
-// How many videos the current choices make, and what is still missing.
-function studioPlan() {
-  const n = k => state.sel[k].size;
-  const sids = chosenScripts();
-  const bss = build.style === 'bss';
-  const tracks = state.music || [];
-  const mine = tracks.filter(m => m.product_id === state.product);
-  const voiceOn = Boolean(sids.length && ME.tts && build.voice);
-  let music = build.music;
-  if (music === 'product' && !mine.length) music = 'none';
-  if (music === 'video' && voiceOn) music = mine.length ? 'product' : 'none';
-  if (music === 'random' && !tracks.length) music = 'none';
-  if (/^\d+$/.test(music) && !tracks.some(m => String(m.id) === music)) music = 'none';
-  const clips = bss ? Math.max(n('hook'), 1) * Math.max(n('cta'), 1) : Math.max(n('hook'), 1) * Math.max(n('body'), 1) * Math.max(n('cta'), 1);
-  const count = clips * Math.max(sids.length, 1);
-  const missing = [];
-  if (bss && !sids.length) missing.push('a script');
-  if (bss && !build.voice) missing.push('a voice');
-  if (bss && !n('body')) missing.push('more clips');
-  return { n, sids, bss, tracks, mine, voiceOn, music, count, missing };
-}
-
-async function openStudio() {
-  let m = $('#studio');
-  if (!m) {
-    m = document.createElement('div');
-    m.id = 'studio';
-    m.className = 'studio-wrap';
-    document.body.appendChild(m);
-    m.addEventListener('click', e => { if (e.target === m) closeStudio(); });
-  }
-  m.innerHTML = '<div class="studio"><div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Loading voices and music…</div></div>';
-  document.body.classList.add('noscroll');
-  await loadBuildLists();
-  renderStudio();
-}
-// Closes the studio and any other window on top (edit product…).
-function closeStudio() { document.querySelectorAll('.studio-wrap').forEach(x => x.remove()); document.body.classList.remove('noscroll'); }
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.querySelector('.studio-wrap')) closeStudio(); });
-
-const LANG_FLAG = { en: 'EN', sw: 'SW', fr: 'FR' };
-
-function renderStudio() {
-  const m = $('#studio');
-  if (!m) return;
-  const P = studioPlan();
-  const scripts = state.data.scripts;
-  const voices = state.voices || [];
-  const q = (state.voiceQuery || '').toLowerCase();
-  const shownVoices = voices.filter(v => !q || (v.name + ' ' + v.info).toLowerCase().includes(q));
-  const langs = [...new Set(scripts.map(s => s.language))];
-  const card = (on, inner, attrs = '', disabled = false) =>
-    `<button type="button" class="opt ${on ? 'on' : ''}" ${disabled ? 'disabled' : ''} ${attrs}>${inner}<span class="tick">✓</span></button>`;
-  const v = voices.find(x => x.id === build.voice);
-
-  m.innerHTML = `<div class="studio" role="dialog" aria-label="Create ads">
-    <header class="st-head">
-      <div><h2>🎬 Create ads</h2>
-        <div class="st-sel"><span class="chip">🎞 ${selCount()} clips</span></div></div>
-      <button class="btn ghost" id="stClose" aria-label="Close">✕</button>
-    </header>
-
-    <div class="st-body">
-      <section class="st-sec">
-        <h3><i>1</i> Style</h3>
-        <div class="opts two">
-          ${card(P.bss, `<div class="ill ill-bss"><b></b><b></b><b></b><b></b><span>the <em>perfect</em> gift</span></div>
-            <div class="opt-t">BSS montage</div><div class="opt-d">One voice, a new shot every ~2 s, karaoke captions, arrows at the end. Like your inspiration ads.</div>`, 'data-style="bss"')}
-          ${card(!P.bss, `<div class="ill ill-classic"><b class="h"></b><b class="b"></b><b class="c"></b></div>
-            <div class="opt-t">Classic</div><div class="opt-d">Whole clips one after the other: every combination of clips is one ad.</div>`, 'data-style="classic"')}
-        </div>
-      </section>
-
-      ${P.bss ? `<section class="st-sec">
-        <h3><i>2</i> Format</h3>
-        <div class="opts two small">
-          ${card(build.format === '4x5', '<div class="ratio r45"></div><div class="opt-t">4:5</div><div class="opt-d">Feed (Facebook, Instagram)</div>', 'data-format="4x5"')}
-          ${card(build.format === '9x16', '<div class="ratio r916"></div><div class="opt-t">9:16</div><div class="opt-d">Reels, Stories, TikTok</div>', 'data-format="9x16"')}
-        </div>
-      </section>` : ''}
-
-      <section class="st-sec">
-        <h3><i>${P.bss ? 3 : 2}</i> Script <small>${P.sids.length ? `${P.sids.length} chosen: each one makes its own ads` : P.bss ? 'choose at least one' : 'optional'}</small></h3>
-        ${scripts.length ? `<div class="quick">${langs.map(l => `<button type="button" class="btn sm" data-alllang="${l}">All ${ME.languages[l] || l}</button>`).join('')}
-          <button type="button" class="btn sm" data-noscripts>None</button></div>
-          <div class="opts scripts-grid">${scripts.map(s => card(P.sids.includes(s.id), `
-            <div class="sc-top"><span class="chip">${LANG_FLAG[s.language] || esc(s.language)}</span>${s.style === 'bss' ? '<span class="chip win">BSS</span>' : ''}${s.angle ? `<span class="chip">${esc(s.angle)}</span>` : ''}</div>
-            <div class="sc-hook">“${esc(s.hook)}”</div>
-            <div class="opt-d">${esc(s.body.slice(0, 90))}${s.body.length > 90 ? '…' : ''}</div>`, `data-script="${s.id}"`)).join('')}</div>`
-          : `<div class="st-empty">No script yet. <a href="#product/${state.product}/scripts" data-close>✨ Write scripts with AI</a> (choose the style BSS).</div>`}
-      </section>
-
-      <section class="st-sec">
-        <h3><i>${P.bss ? 4 : 3}</i> Voice ${v ? `<small>${esc(v.name)}</small>` : ''}</h3>
-        ${!ME.tts ? '<div class="st-empty">Voice-over is not set up on the server (ELEVENLABS_API_KEY).</div>'
-          : state.voicesError ? `<div class="st-empty bad">⚠ ${esc(state.voicesError)}</div>`
-          : `<div class="quick"><input type="text" id="stVoiceQ" placeholder="Search voices: female, african, warm…" value="${esc(state.voiceQuery || '')}">
-              ${P.bss ? '' : `<button type="button" class="btn sm" data-novoice>No voice</button>`}
-              <button type="button" class="btn sm" data-paste>✏️ Voice ID</button></div>
-            <div class="opts voices">${shownVoices.map(x => card(build.voice === x.id, `
-              <div class="vo-row"><span class="vo-av">${esc(x.name.slice(0, 1))}</span>
-                <div><div class="opt-t">${esc(x.name)}</div><div class="opt-d">${esc(x.info || x.category || '')}</div></div></div>
-              ${x.preview ? `<span class="play" data-preview="${esc(x.preview)}" title="Listen">▶</span>` : ''}`, `data-voice="${esc(x.id)}"`, !P.sids.length)).join('')
-              || '<div class="st-empty">No voice matches.</div>'}</div>
-            ${P.sids.length ? '' : '<p class="small muted">Choose a script first: the voice reads it.</p>'}`}
-      </section>
-
-      <section class="st-sec">
-        <h3><i>${P.bss ? 5 : 4}</i> Music</h3>
-        <div class="opts music">
-          ${card(P.music === 'product', `<div class="mu-ic">✨</div><div class="opt-t">AI music of this product</div><div class="opt-d">${P.mine.length ? `${P.mine.length} tracks, a different one per ad` : 'None yet: make some below'}</div>`, 'data-music="product"', !P.mine.length)}
-          ${card(P.music === 'none', '<div class="mu-ic">🔇</div><div class="opt-t">No music</div><div class="opt-d">Voice only</div>', 'data-music="none"')}
-          ${card(P.music === 'video', `<div class="mu-ic">🎬</div><div class="opt-t">TikTok sound</div><div class="opt-d">${P.voiceOn ? 'Not with a voice (it has someone speaking)' : 'The original sound of the clips'}</div>`, 'data-music="video"', P.voiceOn)}
-          ${card(P.music === 'random', `<div class="mu-ic">🎵</div><div class="opt-t">Library mix</div><div class="opt-d">${P.tracks.length} tracks, random per ad</div>`, 'data-music="random"', !P.tracks.length)}
-        </div>
-        ${ME.tts ? `<form class="make-music" id="stMake">
-          <input type="text" name="prompt" placeholder="Describe new music: elegant luxury pop, soft piano, confident…" value="${esc(state.data.product.music_style || '')}">
-          <button class="btn">✨ Make 2 tracks</button></form>` : ''}
-      </section>
-
-      ${P.bss ? '' : `<section class="st-sec">
-        <h3><i>5</i> Captions</h3>
-        <label class="switch"><input type="checkbox" id="stCaptions" ${build.captions ? 'checked' : ''} ${P.sids.length && ME.captions ? '' : 'disabled'}><span></span> Write the script on the video and add the order banner</label>
-      </section>`}
-    </div>
-
-    <footer class="st-foot">
-      <div class="st-sum">
-        <div class="st-count"><b>${P.count}</b> ad${P.count === 1 ? '' : 's'}</div>
-        <div class="small muted">${[P.bss ? `BSS · ${build.format === '9x16' ? '9:16' : '4:5'}` : 'Classic · 9:16',
-          P.sids.length ? `${P.sids.length} script${P.sids.length > 1 ? 's' : ''}` : 'no script', v ? `🎙 ${esc(v.name)}` : '',
-          { product: '✨ AI music', none: 'no music', video: '🎬 TikTok sound', random: '🎵 library mix' }[P.music] || '🎵 one track'].filter(Boolean).join(' · ')}</div>
-      </div>
-      ${P.missing.length ? `<div class="st-miss">Choose ${P.missing.join(', ')}</div>` : ''}
-      <button class="btn primary big" id="stCreate" ${P.missing.length ? 'disabled' : ''}>Create ${P.count} ad${P.count === 1 ? '' : 's'} →</button>
-    </footer>
-  </div>`;
-
-  // Choices
-  const set = (k, v2) => { build[k] = v2; saveBuild(); renderStudio(); };
-  $('#stClose').onclick = closeStudio;
-  m.querySelectorAll('[data-close]').forEach(a => a.addEventListener('click', closeStudio));
-  m.querySelectorAll('[data-style]').forEach(b => b.onclick = () => set('style', b.dataset.style));
-  m.querySelectorAll('[data-format]').forEach(b => b.onclick = () => set('format', b.dataset.format));
-  m.querySelectorAll('[data-script]').forEach(b => b.onclick = () => {
-    const id = Number(b.dataset.script), list = chosenScripts();
-    state.studioScripts[state.product] = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
-    renderStudio();
-  });
-  m.querySelectorAll('[data-alllang]').forEach(b => b.onclick = () => {
-    state.studioScripts[state.product] = scripts.filter(s => s.language === b.dataset.alllang).map(s => s.id);
-    renderStudio();
-  });
-  m.querySelector('[data-noscripts]')?.addEventListener('click', () => { state.studioScripts[state.product] = []; renderStudio(); });
-  m.querySelectorAll('[data-voice]').forEach(b => b.onclick = e => {
-    if (e.target.closest('[data-preview]')) return;
-    build.voiceName = voices.find(x => x.id === b.dataset.voice)?.name || '';
-    set('voice', b.dataset.voice);
-  });
-  m.querySelector('[data-novoice]')?.addEventListener('click', () => set('voice', ''));
-  m.querySelector('[data-paste]')?.addEventListener('click', () => {
-    const id = (prompt('ElevenLabs voice ID (ElevenLabs: Voices → a voice → ⋯ → Copy voice ID):') || '').trim();
-    if (id) { build.voiceName = 'Voice ' + id.slice(0, 8); set('voice', id); }
-  });
-  const vq = $('#stVoiceQ');
-  if (vq) vq.oninput = () => {
-    state.voiceQuery = vq.value;
-    const pos = vq.selectionStart;
-    renderStudio();
-    const again = $('#stVoiceQ'); again.focus(); again.setSelectionRange(pos, pos);
-  };
-  // Voice previews
-  let audio = null;
-  m.querySelectorAll('[data-preview]').forEach(p => p.onclick = e => {
-    e.stopPropagation();
-    if (audio) { audio.pause(); m.querySelectorAll('.play.on').forEach(x => { x.classList.remove('on'); x.textContent = '▶'; }); }
-    if (audio && audio.src === p.dataset.preview) { audio = null; return; }
-    audio = new Audio(p.dataset.preview);
-    audio.play().catch(() => {});
-    p.classList.add('on'); p.textContent = '❚❚';
-    audio.onended = () => { p.classList.remove('on'); p.textContent = '▶'; };
-  });
-  m.querySelectorAll('[data-music]').forEach(b => b.onclick = () => set('music', b.dataset.music));
-  const cap = $('#stCaptions');
-  if (cap) cap.onchange = () => set('captions', cap.checked);
-  const mk = $('#stMake');
-  if (mk) mk.onsubmit = e => { e.preventDefault(); makeMusic(mk); };
-  $('#stCreate').onclick = createAds;
-}
-
-// ✨ Make music: 2 instrumental tracks for this product with ElevenLabs.
-async function makeMusic(form) {
-  const prompt = form.prompt.value.trim();
-  if (prompt.length < 3) return fail(new Error('Describe the music first (style and mood)'));
-  const btn = $('button', form);
-  btn.disabled = true; btn.textContent = '✨ Making… (1-2 min)';
-  try {
-    await api('/api/music/generate', { method: 'POST', body: { prompt, count: 2, seconds: 30, product_id: state.product } });
-    state.data.product.music_style = prompt;
-    state.music = null;
-    build.music = 'product'; saveBuild();
-    toast('2 music tracks made for this product');
-    await loadBuildLists();
-  } catch (e) { fail(e); }
-  renderStudio();
-}
-
-async function createAds() {
-  const P = studioPlan();
-  const btn = $('#stCreate');
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const v = (state.voices || []).find(x => x.id === build.voice) || (build.voice ? { name: build.voiceName } : null);
-    await api(`/api/products/${state.product}/creatives`, { method: 'POST', body: {
-      hooks: [...state.sel.hook], bodies: [...state.sel.body], ctas: [...state.sel.cta], script_ids: P.sids,
-      voice_id: P.sids.length && ME.tts ? build.voice : '', voice_name: v?.name || '',
-      music: P.music, captions: build.captions, style: build.style, format: build.format } });
-    state.sel = { hook: new Set(), body: new Set(), cta: new Set() };
-    closeStudio();
-    toast(`${P.count} ad(s) are being made`);
-    location.hash = `product/${state.product}/creatives`;
-  } catch (e) { fail(e); btn.disabled = false; btn.textContent = `Create ${P.count} ads →`; }
-}
-
-
-// Scripts: AI script studio + the product's scripts.
-const scriptText = s => [s.hook, s.body, s.cta].filter(Boolean).join(' ');
-const wordsOf = t => (String(t || '').trim().match(/\S+/g) || []).length;
-function renderScripts() {
-  const { scripts } = state.data;
-  const langs = ME.languages;
-  const t = $('#tab');
-  const g = state.scriptGen ??= { language: Object.keys(langs)[0], style: 'bss', count: 3, extra: '' };
-  const lf = state.scriptLang || 'all';
-  const list = scripts.filter(s => lf === 'all' || s.language === lf);
-  const totalSec = scripts.reduce((n, s) => n + wordsOf(scriptText(s)) / 2.6, 0);
-  t.innerHTML = `
-    <form class="ss-hero" id="genForm">
-      <div class="ss-hero-top">
-        <div><span class="ag-kicker">AI script studio</span><h2>✍️ Voice-over scripts that sell</h2>
-          <p>The AI reads the product, its analysis and your angles, then writes the voice-over, the post text and the headline.</p></div>
-        <div class="ag-hero-stats"><div><b>${scripts.length}</b><span>Scripts</span></div><div><b>${Object.keys(langs).filter(k => scripts.some(s => s.language === k)).length}</b><span>Languages</span></div><div><b>${totalSec < 90 ? `${Math.round(totalSec)}s` : `${Math.round(totalSec / 60)}m`}</b><span>Of voice-over</span></div></div>
-      </div>
-      ${ME.ai ? '' : '<div class="ss-warn">AI is not set up on the server yet (ANTHROPIC_API_KEY). You can still add scripts by hand below.</div>'}
-      <div class="ss-grid">
-        <div class="ss-field"><label>Language</label>
-          <div class="ss-seg">${Object.entries(langs).map(([k, l]) => `<button type="button" data-lang="${k}" class="${g.language === k ? 'on' : ''}">${esc(l)}</button>`).join('')}</div></div>
-        <div class="ss-field"><label>How many</label>
-          <div class="ss-step"><button type="button" data-step="-1">−</button><b id="ssCount">${g.count}</b><button type="button" data-step="1">＋</button></div></div>
-        <div class="ss-field wide"><label>Style</label>
-          <div class="ss-styles">
-            <button type="button" data-style="bss" class="${g.style === 'bss' ? 'on' : ''}"><i>🎁</i><div><b>BSS gift story</b><small>One warm voice, ~25 s, montage of close-ups</small></div></button>
-            <button type="button" data-style="classic" class="${g.style === 'classic' ? 'on' : ''}"><i>⚡</i><div><b>Classic</b><small>Short and direct, 15-20 s</small></div></button>
-          </div></div>
-        <div class="ss-field wide"><label>Extra instructions <small>optional</small></label>
-          <textarea id="ssExtra" rows="2" placeholder="e.g. target mothers, use a gift angle, mention the 2-for-1 offer">${esc(g.extra)}</textarea>
-          <div class="ss-angles" id="ssAngles"></div></div>
-      </div>
-      <div class="ss-go"><span class="small">Each script comes with its post text and headline.</span>
-        <button class="btn primary big" id="ssGen" ${ME.ai ? '' : 'disabled'}>✨ Write ${g.count} script${g.count > 1 ? 's' : ''}</button></div>
-    </form>
-
-    <details class="ss-hand"><summary><span>✍️</span><div><b>Write a script yourself</b><small>Paste or type a voice-over: the platform prepares it for the video by itself.</small></div></summary>
-      <form id="manForm">
-        <div class="row"><div style="width:170px"><label class="f">Language</label><select name="language">${Object.entries(langs).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div style="flex:1"><label class="f">Angle</label><input type="text" name="angle" placeholder="e.g. testimonial"></div></div>
-        <label class="f">Script (what the voice says)</label><textarea name="script" rows="5" required placeholder="Write the whole script…"></textarea>
-        <div class="row"><div style="flex:2"><label class="f">Post text (optional)</label><textarea name="primary_text" rows="3"></textarea></div>
-        <div style="flex:1"><label class="f">Headline (optional)</label><input type="text" name="headline"></div></div>
-        <button class="btn primary" style="margin-top:10px">Save script</button>
-      </form>
-    </details>
-
-    ${scripts.length ? `<div class="ss-bar">
-      <div class="ss-filter">${[['all', 'All'], ...Object.entries(langs)].map(([k, l]) => { const n = k === 'all' ? scripts.length : scripts.filter(s => s.language === k).length; return n || k === 'all' ? `<button data-lf="${k}" class="${lf === k ? 'on' : ''}">${esc(l)} <i>${n}</i></button>` : ''; }).join('')}</div>
-    </div>` : ''}
-    <div class="ss-list">
-      ${list.map((s, i) => {
-        const text = scriptText(s), w = wordsOf(text), sec = Math.round(w / 2.6);
-        const first = (text.match(/^[^.!?…]+[.!?…]+/) || [''])[0];
-        return `<article class="ss-card th${i % 8}" data-id="${s.id}">
-          <header><div class="ss-tags"><span class="ss-lang">${esc(langs[s.language] || s.language)}</span>${s.style === 'bss' ? '<span class="ss-style">🎁 BSS</span>' : '<span class="ss-style">⚡ Classic</span>'}</div>
-            <h3>${esc(s.angle || 'Script')}</h3>
-            <div class="ss-meta"><span>⏱ ~${sec} s</span><span>📝 ${w} words</span></div></header>
-          <div class="ss-text"><span class="ss-open">${esc(first)}</span>${esc(text.slice(first.length))}</div>
-          ${s.primary_text || s.headline ? `<details class="ss-copy"><summary>📣 Ad copy for the post</summary>
-            <div class="ss-post"><pre>${esc(s.primary_text)}</pre>${s.headline ? `<div class="ss-headline"><small>HEADLINE</small><b>${esc(s.headline)}</b><span>Order now</span></div>` : ''}</div></details>` : ''}
-          <footer><span class="muted small">${esc(s.author || '')} · ${esc(s.created_at.slice(0, 16))}</span>
-            <div class="row"><button class="btn sm" data-copy title="Copy the voice-over">📋 Script</button>${s.primary_text || s.headline ? '<button class="btn sm" data-copyall title="Copy script, headline and post text">📋 All</button>' : ''}<button class="icon-btn danger" data-del title="Delete">🗑</button></div></footer>
-        </article>`;
-      }).join('')}
-    </div>
-    ${scripts.length ? '' : '<div class="empty card">No script yet: write the first ones with the AI above.</div>'}`;
-
-  // Generator choices (remembered while you stay on the page)
-  const genBtn = $('#ssGen');
-  const syncBtn = () => { genBtn.textContent = `✨ Write ${g.count} script${g.count > 1 ? 's' : ''}`; };
-  t.querySelectorAll('[data-lang]').forEach(b => b.onclick = () => { g.language = b.dataset.lang; t.querySelectorAll('[data-lang]').forEach(x => x.classList.toggle('on', x === b)); });
-  t.querySelectorAll('[data-style]').forEach(b => b.onclick = () => { g.style = b.dataset.style; t.querySelectorAll('[data-style]').forEach(x => x.classList.toggle('on', x === b)); });
-  t.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { g.count = Math.min(6, Math.max(1, g.count + Number(b.dataset.step))); $('#ssCount').textContent = g.count; syncBtn(); });
-  $('#ssExtra').oninput = e => { g.extra = e.target.value; };
-  // The saved marketing angles, one click to use them.
-  api(`/api/products/${state.product}/strategy`).then(st => {
-    const box = $('#ssAngles');
-    const angles = (st.angles || []).filter(a => a.selected);
-    if (!box || !angles.length) return;
-    box.innerHTML = `<small>Use a saved angle:</small>${angles.map(a => `<button type="button" data-ang="${a.id}" title="${esc(a.message)}">🎯 ${esc(a.name)}</button>`).join('')}`;
-    box.querySelectorAll('[data-ang]').forEach(b => b.onclick = () => {
-      const a = angles.find(x => x.id === Number(b.dataset.ang));
-      const line = `Angle "${a.name}": ${a.message}${a.audience ? ` (audience: ${a.audience})` : ''}`;
-      g.extra = g.extra.includes(line) ? g.extra : (g.extra ? g.extra.trim() + '\n' : '') + line;
-      $('#ssExtra').value = g.extra; b.classList.add('on');
-    });
-  }).catch(() => {});
-  $('#genForm').onsubmit = async e => {
-    e.preventDefault();
-    genBtn.disabled = true; genBtn.innerHTML = '<span class="spin sm"></span> Writing… (up to a minute)';
-    try {
-      const { ids } = await api(`/api/products/${state.product}/scripts/generate`, { method: 'POST', body: { language: g.language, style: g.style, count: g.count, extra: g.extra } });
-      toast(`${ids.length} script(s) written`);
-      renderProduct(state.product);
-    } catch (err) { fail(err); genBtn.disabled = false; syncBtn(); }
-  };
-  $('#manForm').onsubmit = async e => {
-    e.preventDefault();
-    try { await api(`/api/products/${state.product}/scripts`, { method: 'POST', body: Object.fromEntries(new FormData(e.target)) }); renderProduct(state.product); } catch (err) { fail(err); }
-  };
-  t.querySelectorAll('[data-lf]').forEach(b => b.onclick = () => { state.scriptLang = b.dataset.lf; renderScripts(); });
-  t.querySelectorAll('.ss-card').forEach(el => {
-    const s = scripts.find(x => x.id === Number(el.dataset.id));
-    const copy = txt => navigator.clipboard.writeText(txt).then(() => toast('Copied'), () => fail(new Error('Copy failed')));
-    $('[data-copy]', el).onclick = () => copy(scriptText(s));
-    $('[data-copyall]', el)?.addEventListener('click', () => copy(`${scriptText(s)}${s.headline ? `\n\nHEADLINE:\n${s.headline}` : ''}${s.primary_text ? `\n\nPOST TEXT:\n${s.primary_text}` : ''}`));
-    $('[data-del]', el).onclick = async () => {
-      if (!confirm('Delete this script?')) return;
-      try { await api(`/api/scripts/${s.id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
-    };
-  });
-}
-
-// Creatives: finished videos, their state, status and download.
-const musicName = id => (state.musicAll || []).find(m => m.id === id)?.name || 'music';
-
-function renderCreatives() {
-  if (!state.musicAll) api('/api/music').then(m => { state.musicAll = m; if (state.tab === 'creatives') renderCreatives(); }).catch(() => {});
-  const { creatives, scripts, clips } = state.data;
-  const clipName = id => clips.find(c => c.id === id)?.label || (id ? `#${id}` : '');
-  const t = $('#tab');
-  const filter = state.filter || 'all';
-  const list = creatives.filter(c => filter === 'all' || c.status === filter);
-  t.innerHTML = `
-    <div class="row spread" style="margin-bottom:14px">
-      <div class="row">${['all', ...ME.statuses].map(s => `<button class="btn sm ${filter === s ? 'dark' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABEL[s]}</button>`).join('')}</div>
-      <span class="muted small">Build new videos from the Footage tab.</span>
-    </div>
-    <div class="grid creatives">
-      ${list.map(c => {
-        const s = scripts.find(x => x.id === c.script_id);
-        const media = c.render === 'ready'
-          ? `<video src="/media/creative/${c.id}" poster="/media/thumb/creative/${c.id}" controls preload="none" playsinline></video>`
-          : c.render === 'failed' ? `<div style="padding:14px;text-align:center"><div style="color:#ff8a7a">Failed</div><div class="small" style="margin:6px 0">${esc(c.error).slice(0, 320)}</div><button class="btn sm" data-retry>Try again</button></div>`
-          : `<div style="text-align:center"><div class="spin" style="margin:0 auto 8px"></div>${c.render === 'rendering' ? 'Making video…' : 'Waiting…'}</div>`;
-        return `<div class="card creative" data-id="${c.id}">
-          <div class="media">${media}</div>
-          <div class="meta">
-            <input type="text" value="${esc(c.name)}" data-name title="Name">
-            <div class="small muted">🎞 ${c.style === 'bss' ? 'Montage' : `${[c.hook_clip, c.body_clip, c.cta_clip].filter(Boolean).length} clips`}</div>
-            ${s ? `<div class="small" title="${esc(s.hook + '\n\n' + s.body + '\n\n' + s.cta)}">📝 ${esc(s.language.toUpperCase())} · ${esc(s.hook.slice(0, 60))}</div>` : ''}
-            ${c.voice_name || c.music_id || c.captions ? `<div class="small muted">${[c.voice_name && `🎙 ${esc(c.voice_name)}`, c.music_id && `🎵 ${esc(musicName(c.music_id))}`, c.captions && '💬 captions'].filter(Boolean).join(' · ')}</div>` : ''}
-            <div class="row" style="flex-wrap:nowrap">
-              <select data-status class="status-${c.status}">${ME.statuses.map(x => `<option value="${x}" ${x === c.status ? 'selected' : ''}>${STATUS_LABEL[x]}</option>`).join('')}</select>
-              ${c.render === 'ready' ? `<a class="btn sm" href="/media/creative/${c.id}?download=1" title="Download">⬇</a>` : ''}
-              <button class="btn sm danger" data-del title="Delete">✕</button>
-            </div>
-            <div class="small muted">${c.render === 'ready' ? fmtDur(c.duration) + ' · ' : ''}${esc(c.author || '')}</div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>
-    ${list.length ? '' : `<div class="empty">${creatives.length ? 'No video with this status.' : 'No video yet. Go to <b>Footage</b>, tick clips, then click <b>🎬 Create ads</b>.'}</div>`}`;
-
-  t.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => { state.filter = b.dataset.filter; renderCreatives(); });
-  t.querySelectorAll('.creative').forEach(el => {
-    const id = Number(el.dataset.id);
-    $('[data-name]', el).onchange = e => api(`/api/creatives/${id}`, { method: 'PATCH', body: { name: e.target.value } }).catch(fail);
-    $('[data-status]', el).onchange = async e => {
-      try { await api(`/api/creatives/${id}`, { method: 'PATCH', body: { status: e.target.value } }); e.target.className = `status-${e.target.value}`; } catch (err) { fail(err); }
-    };
-    $('[data-del]', el).onclick = async () => {
-      if (!confirm('Delete this video?')) return;
-      try { await api(`/api/creatives/${id}`, { method: 'DELETE' }); renderProduct(state.product); } catch (err) { fail(err); }
-    };
-    const retry = $('[data-retry]', el);
-    if (retry) retry.onclick = async () => { try { await api(`/api/creatives/${id}/retry`, { method: 'POST' }); renderProduct(state.product); } catch (err) { fail(err); } };
-  });
-
-  // While videos are being made, check every 3 seconds.
-  clearInterval(state.poll);
-  if (creatives.some(c => c.render === 'queued' || c.render === 'rendering')) {
-    state.poll = setInterval(async () => {
-      if (state.tab !== 'creatives' || !location.hash.startsWith(`#product/${state.product}`)) return clearInterval(state.poll);
-      const before = JSON.stringify(state.data.creatives.map(c => c.render));
-      await loadProduct(state.product).catch(() => {});
-      if (JSON.stringify(state.data.creatives.map(c => c.render)) !== before) renderCreatives();
-    }, 3000);
-  }
-}
-
 function play(src) {
   const m = document.createElement('div');
   m.className = 'modal';
@@ -1497,64 +828,77 @@ function play(src) {
   document.body.appendChild(m);
 }
 
-// ---------- Music library ----------
-async function renderMusic() {
+// ---------- Dashboard: real totals (nothing invented), recent products, where to go next ----------
+async function renderDashboard() {
   const v = $('#view');
-  const tracks = await api('/api/music').catch(fail) || [];
-  state.musicAll = tracks;
+  const [d, list] = await Promise.all([api('/api/dashboard').catch(() => null), api('/api/products').catch(() => [])]);
+  if (!d) return;
+  await loadMarkets();
   v.innerHTML = `
-    <h1>Music</h1>
-    <p class="muted">Tracks for the background of the ads, shared by all products. Use music you are allowed to use in ads
-      (Meta Sound Collection, Pixabay Music, YouTube Audio Library…): TikTok trending sounds get ads muted or rejected.
-      Under a voice-over the music plays quietly. Videos cut with Auto-split add their own sound here by themselves (🎬).</p>
-    <div class="card">
-      <div class="drop" id="musicDrop">⬆ Drop music, or a video to take its sound (mp3, m4a, wav, mp4…)<input type="file" accept="audio/*,video/*" multiple class="hidden"></div>
-      <div class="progress hidden"><div></div></div>
+    <div class="page-head">
+      <div><h1>Dashboard</h1><div class="muted">Products, marketing angles and footage of the team</div></div>
+      <button class="btn primary" id="dbNew">+ New product</button>
     </div>
-    ${ME.tts ? `<form class="card" id="genMusic" style="margin-top:14px">
-      <h2>✨ Make music with AI (ElevenLabs)</h2>
-      <p class="small muted" style="margin-top:-4px">Instrumental, no voice, cleared for ads. Describe a style and a mood, without artist or song names.</p>
-      <div class="row" style="align-items:end">
-        <div style="flex:1;min-width:260px"><label class="f">Description</label>
-          <input type="text" name="prompt" required placeholder="e.g. elegant luxury pop, soft piano and strings, confident, for a watch ad"></div>
-        <div style="width:110px"><label class="f">Seconds</label><input type="number" name="seconds" min="10" max="120" value="30"></div>
-        <div style="width:100px"><label class="f">How many</label><input type="number" name="count" min="1" max="3" value="2"></div>
-        <button class="btn primary">Make</button>
+    <section class="ag-hero">
+      <div class="ag-hero-txt"><span class="ag-kicker">Ad creative Centre</span>
+        <h2>${d.products ? `${d.products} product${d.products === 1 ? '' : 's'}` : 'Start with your first product'}</h2>
+        <p>${d.products ? 'Analyse each product, choose its marketing angles, then upload its videos: the AI cuts them into scenes and matches them with the angles.' : 'Add a product, let the AI analyse it and write its marketing angles, then upload its videos.'}</p></div>
+      <div class="ag-hero-stats">
+        <div><b>${d.products}</b><span>Products</span></div>
+        <div><b>${d.analysed}</b><span>Analysed</span></div>
+        <div class="hot"><b>${d.selected}</b><span>Angles chosen</span></div>
+        <div><b>${d.videos}</b><span>Videos${d.processing ? ` · ${d.processing} in work` : ''}</span></div>
+        <div><b>${d.analysed_scenes}</b><span>Scenes analysed</span></div>
       </div>
-    </form>` : ''}
-    <div class="card" style="margin-top:14px">
-      ${tracks.length ? `<table class="t"><thead><tr><th>Name</th><th>Listen</th><th>Length</th><th>Used in</th><th></th></tr></thead><tbody>
-        ${tracks.map(m => `<tr data-id="${m.id}">
-          <td><input type="text" value="${esc(m.name)}" data-name></td>
-          <td><audio controls preload="none" src="/media/music/${m.id}" style="height:32px"></audio></td>
-          <td>${fmtDur(m.duration)}</td><td>${m.used} video${m.used === 1 ? '' : 's'}</td>
-          <td><button class="btn sm danger" data-del>✕</button></td></tr>`).join('')}
-      </tbody></table>` : '<div class="empty">No music yet.</div>'}
+    </section>
+    ${d.products ? `
+    <div class="ltiles" style="margin:16px 0">
+      <a class="ltile" href="#angles"><span class="lt-ic" style="background:linear-gradient(135deg,#7c3aed,#c084fc)">🎯</span>
+        <div><b>Marketing angles</b><small>${d.angles} written · ${d.selected} chosen</small></div><i>→</i></a>
+      <a class="ltile" href="#footage"><span class="lt-ic" style="background:linear-gradient(135deg,#0ea5e9,#22d3ee)">🎞</span>
+        <div><b>Footage library</b><small>${d.videos} video${d.videos === 1 ? '' : 's'} · ${d.scenes} scenes · ${d.favorites} ★</small></div><i>→</i></a>
+    </div>
+    <div class="plist card">
+      <div class="prow phead"><div>Recent products</div><div>Status</div><div>Markets</div><div>Analysis</div><div>Angles</div><div>Footage</div><div>Activity</div></div>
+      ${list.slice(0, 6).map(productRow).join('')}
+    </div>` : `
+    <div class="card s-empty" style="margin-top:16px"><div class="s-empty-ic">📦</div><h2>No product yet</h2>
+      <p class="muted">1. Add a product (or import it from its page) · 2. Analyse it and choose its marketing angles · 3. Upload its videos</p>
+      <button class="btn primary big" id="dbNew2">+ New product</button></div>`}`;
+  const go = () => { state.openNew = true; location.hash = 'products'; };
+  $('#dbNew').onclick = go;
+  $('#dbNew2')?.addEventListener('click', go);
+}
+
+// One product line (dashboard and products list share it).
+function productRow(p) {
+  return `<a class="prow" href="#product/${p.id}">
+    <div class="pname">${productPic(p) ? `<img src="${productPic(p)}" alt="" loading="lazy">` : '<span class="pimg-empty">🎬</span>'}<b>${esc(p.name)}</b></div>
+    <div><span class="pst st-${p.status}">${P_STATUS[p.status] || esc(p.status)}</span></div>
+    <div class="mks">${marketBadges(p.markets) || '<span class="muted small">–</span>'}</div>
+    <div class="small">${ANALYSIS_LABEL[p.analysis_status] || '<span class="muted">–</span>'}</div>
+    <div class="small">${p.angles ? `🎯 ${p.angles}${p.selected_angles ? ` · <b>${p.selected_angles} chosen</b>` : ''}` : '<span class="muted">–</span>'}</div>
+    <div class="small">${p.videos ? `🎞 ${p.videos} video${p.videos > 1 ? 's' : ''} · ${p.scenes} scenes` : '<span class="muted">–</span>'}</div>
+    <div class="muted small">${ago(p.last_activity)}</div>
+  </a>`;
+}
+
+// ---------- Marketing angles / Footage library: every product, one click to its tab ----------
+async function renderHub(kind) {
+  const v = $('#view');
+  await loadMarkets();
+  const list = await api('/api/products').catch(fail) || [];
+  const angles = kind === 'angles';
+  v.innerHTML = `
+    <div class="page-head">
+      <div><h1>${angles ? '🎯 Marketing angles' : '🎞 Footage library'}</h1>
+        <div class="muted">${angles ? 'Each product has its own analysis and angles: click a product to open them.' : 'Each product has its own videos and AI scenes: click a product to open them.'}</div></div>
+    </div>
+    <div class="plist card">
+      <div class="prow phead"><div>Product</div><div>Status</div><div>Markets</div><div>Analysis</div><div>Angles</div><div>Footage</div><div>Activity</div></div>
+      ${list.map(p => productRow(p).replace(`href="#product/${p.id}"`, `href="#product/${p.id}/${angles ? 'strategy' : 'footage'}"`)).join('')}
+      ${list.length ? '' : '<div class="empty">No product yet. Add one from <b>+ New product</b>.</div>'}
     </div>`;
-  const gen = $('#genMusic');
-  if (gen) gen.onsubmit = async e => {
-    e.preventDefault();
-    const btn = $('button', gen);
-    btn.disabled = true; btn.textContent = 'Making… (1-2 min)';
-    try {
-      const { ids } = await api('/api/music/generate', { method: 'POST', body: Object.fromEntries(new FormData(gen)) });
-      toast(`${ids.length} track(s) made`);
-      renderMusic();
-    } catch (err) { fail(err); btn.disabled = false; btn.textContent = 'Make'; }
-  };
-  const d = $('#musicDrop'), input = $('input', d);
-  const send = files => upload('/api/music', {}, files, d, r => `${r.added} track(s) added${r.skipped?.length ? ` · not audio: ${r.skipped.join(', ')}` : ''}`,
-    r => !!r.skipped?.length, renderMusic);
-  d.onclick = e => { if (e.target !== input) input.click(); };
-  input.onchange = () => send(input.files);
-  d.ondragover = e => { e.preventDefault(); d.classList.add('over'); };
-  d.ondragleave = () => d.classList.remove('over');
-  d.ondrop = e => { e.preventDefault(); d.classList.remove('over'); send(e.dataTransfer.files); };
-  v.querySelectorAll('tr[data-id]').forEach(tr => {
-    const id = Number(tr.dataset.id);
-    $('[data-name]', tr).onchange = e => api(`/api/music/${id}`, { method: 'PATCH', body: { name: e.target.value } }).then(() => toast('Renamed'), fail);
-    $('[data-del]', tr).onclick = () => { if (confirm('Delete this track?')) api(`/api/music/${id}`, { method: 'DELETE' }).then(renderMusic, fail); };
-  });
 }
 
 // ---------- Team ----------
@@ -1625,9 +969,7 @@ async function loadFootage() {
 async function renderFootage() {
   state.ftab ||= 'videos';
   const t = $('#tab');
-  if (state.ftab !== 'clips') {
-    try { await loadFootage(); } catch (e) { fail(e); }
-  }
+  try { await loadFootage(); } catch (e) { fail(e); }
   const f = state.foot || { assets: [], scenes: [], totals: {} };
   const busy = f.assets.filter(a => BUSY.includes(a.status)).length;
   const analyzed = f.scenes.filter(s => s.status === 'analyzed').length;
@@ -1636,7 +978,7 @@ async function renderFootage() {
       <div class="fl-hero-txt">
         <span class="ag-kicker">Footage library</span>
         <h2>🎞 Every video of this product, cut into scenes and understood by AI</h2>
-        <p>Upload once, reuse the scenes in every ad. Originals are kept as uploaded${state.footCfg ? ` (${state.footCfg.storage === 's3' ? 'cloud storage' : 'server storage'})` : ''}.</p>
+        <p>Upload once, reuse the scenes in every ad. Scenes play from a silent copy (all original sound removed); originals are kept as uploaded${state.footCfg ? ` (${state.footCfg.storage === 's3' ? 'cloud storage' : 'server storage'})` : ''}.</p>
       </div>
       <div class="ag-hero-stats fl-stats">
         <div><b>${f.assets.length}</b><span>Videos</span></div>
@@ -1649,11 +991,9 @@ async function renderFootage() {
     <div class="fl-tabs">
       <a data-ft="videos" class="${state.ftab === 'videos' ? 'on' : ''}">🎬 Original videos <i>${f.assets.length}</i>${busy ? '<span class="fl-dot"></span>' : ''}</a>
       <a data-ft="scenes" class="${state.ftab === 'scenes' ? 'on' : ''}">✨ AI scenes <i>${f.scenes.length}</i></a>
-      <a data-ft="clips" class="${state.ftab === 'clips' ? 'on' : ''}">✂️ Clips for the ad maker <i>${state.data.clips.length}</i></a>
     </div>
     <div id="ftabBody"></div>`;
   t.querySelectorAll('[data-ft]').forEach(a => a.onclick = () => { state.ftab = a.dataset.ft; renderFootage(); });
-  if (state.ftab === 'clips') return renderClipsTab();
   if (state.ftab === 'scenes') drawScenes(); else drawVideos();
   watchFootage();
 }
@@ -1665,7 +1005,7 @@ function watchFootage() {
   const busy = () => state.foot?.assets.some(a => BUSY.includes(a.status)) || ['queued', 'running'].includes(state.foot?.match_job?.status);
   if (!busy()) return;
   state.fpoll = setInterval(async () => {
-    if (state.tab !== 'footage' || state.ftab === 'clips' || state.product !== pid || !location.hash.startsWith(`#product/${pid}`)) return clearInterval(state.fpoll);
+    if (state.tab !== 'footage' || state.product !== pid || !location.hash.startsWith(`#product/${pid}`)) return clearInterval(state.fpoll);
     if (document.querySelector('.insp')) return; // do not redraw under the open inspector
     try { await loadFootage(); } catch { return; }
     state.ftab === 'scenes' ? drawScenes() : drawVideos();
@@ -1710,7 +1050,7 @@ function drawVideos() {
   body.querySelectorAll('.fv-card').forEach(card => {
     const a = f.assets.find(x => x.id === Number(card.dataset.id));
     const on = (sel, fn) => { const b = $(sel, card); if (b) b.onclick = e => { e.stopPropagation(); fn(b); }; };
-    on('[data-play]', () => a.stored && play(`/media/footage/${a.id}/preview`));
+    on('[data-play]', () => a.silent && play(`/media/footage/${a.id}/preview`));
     on('[data-rename]', async () => {
       const name = prompt('Video name:', a.name);
       if (name && name.trim() !== a.name) try { await api(`/api/footage/${a.id}`, { method: 'PATCH', body: { name } }); renderFootage(); } catch (e) { fail(e); }
@@ -1722,7 +1062,6 @@ function drawVideos() {
       try { await api(`/api/footage/${a.id}`, { method: 'DELETE' }); toast('Video deleted'); renderFootage(); } catch (e) { fail(e); }
     });
     on('[data-scenes]', () => { state.fflt.video = String(a.id); state.ftab = 'scenes'; renderFootage(); });
-    on('[data-toclips]', async () => { try { await api(`/api/footage/${a.id}/to-clips`, { method: 'POST' }); toast('Sent to the ad maker: it is being cut into clips'); } catch (e) { fail(e); } });
     on('[data-log]', () => showJobLog(a));
   });
 }
@@ -1730,11 +1069,11 @@ function drawVideos() {
 function videoCard(a) {
   const busy = BUSY.includes(a.status);
   const pct = Math.round((a.progress || 0) * 100);
-  const chips = a.duration ? [fmtDur(a.duration), `${a.width}×${a.height}`, a.aspect, a.fps ? `${a.fps} fps` : '', a.vcodec, fmtSize(a.size), a.has_audio ? '🔊 sound' : '🔇 no sound'].filter(Boolean) : [fmtSize(a.size)];
+  const chips = a.duration ? [fmtDur(a.duration), `${a.width}×${a.height}`, a.aspect, a.fps ? `${a.fps} fps` : '', a.vcodec, fmtSize(a.size), a.silent ? '🔇 Silent copy ✓' : ''].filter(Boolean) : [fmtSize(a.size)];
   return `<article class="fv-card st-${a.status}" data-id="${a.id}">
     <div class="fv-media ${a.orientation || ''}" data-play title="Preview">
       ${a.meta_done ? `<img src="/media/footage/${a.id}/thumb" alt="" loading="lazy">` : '<div class="fv-ph">🎬</div>'}
-      ${a.stored && a.meta_done ? '<span class="fv-playbtn">▶</span>' : ''}
+      ${a.silent ? '<span class="fv-playbtn">▶</span>' : ''}
       ${a.duration ? `<span class="fv-dur">${fmtDur(a.duration)}</span>` : ''}
       ${a.orientation ? `<span class="fv-ori">${a.orientation === 'vertical' ? '▯' : a.orientation === 'horizontal' ? '▭' : '◻'} ${esc(a.aspect)}</span>` : ''}
     </div>
@@ -1751,7 +1090,7 @@ function videoCard(a) {
       <span class="fv-cost" title="${a.ai_calls} AI call(s)">${a.ai_calls ? `AI $${a.ai_cost.toFixed(3)}` : ''}</span>
       <div class="fv-acts">
         <button class="icon-btn" data-log title="Processing log">📋</button>
-        ${a.stored ? `<button class="icon-btn" data-toclips title="Also cut it into clips for the ad maker">✂️</button><a class="icon-btn" href="/media/footage/${a.id}/original?download=1" title="Download the original" onclick="event.stopPropagation()">⬇</a>` : ''}
+        ${a.stored ? `<a class="icon-btn" href="/media/footage/${a.id}/original?download=1" title="Download the original" onclick="event.stopPropagation()">⬇</a>` : ''}
         <button class="icon-btn danger" data-del title="Delete">🗑</button>
       </div>
     </div>

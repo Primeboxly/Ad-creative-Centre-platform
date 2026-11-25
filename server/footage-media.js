@@ -73,16 +73,56 @@ export async function videoInfo(file, ctx) {
   return parseInfo(r.err);
 }
 
-// Browsers and phones play H.264 MP4 well. Anything else, or a very big file, gets a light preview copy.
+// Browsers and phones play H.264 MP4 well. Anything else, or a very big file, is re-encoded for the silent copy.
 export const needsProxy = (info, ext, size) => ext !== '.mp4' || info.vcodec !== 'h264' || Math.max(info.width, info.height) > 1920
   || (info.duration > 0 && size / info.duration > 1.6e6);
 
-export async function makeProxy(src, out, info, ctx) {
+// The silent working copy of a video: the picture only, every audio stream removed (-an, first video stream only).
+// Light videos keep their picture as it is (no quality loss); others become H.264, longest side 1280 px.
+export async function makeSilentCopy(src, out, info, ext, size, ctx) {
+  let r;
+  if (!needsProxy(info, ext, size)) {
+    r = await ff(['-y', '-i', src, '-map', '0:v:0', '-c:v', 'copy', '-an', '-sn', '-dn', '-map_metadata', '-1', '-movflags', '+faststart', out], ctx);
+    if (r.code === 0 && existsSync(out)) return 'copied';
+  }
   const long = Math.max(info.width, info.height);
   const scale = long > 1280 ? (info.width >= info.height ? 'scale=1280:-2' : 'scale=-2:1280') : 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
-  const r = await ff(['-y', '-i', src, '-vf', scale, '-c:v', 'libx264', '-preset', 'veryfast', '-threads', '2', '-crf', '26', '-pix_fmt', 'yuv420p',
-    ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '96k'] : ['-an']), '-movflags', '+faststart', out], ctx);
-  if (r.code !== 0 || !existsSync(out)) throw ffError(r, 'Could not make the preview copy');
+  r = await ff(['-y', '-i', src, '-map', '0:v:0', '-vf', scale, '-c:v', 'libx264', '-preset', 'veryfast', '-threads', '2', '-crf', '26', '-pix_fmt', 'yuv420p',
+    '-an', '-sn', '-dn', '-map_metadata', '-1', '-movflags', '+faststart', out], ctx);
+  if (r.code !== 0 || !existsSync(out)) throw ffError(r, 'Could not make the silent copy');
+  return 'encoded';
+}
+
+// ffprobe: the server's (FFPROBE_PATH, /usr/bin/ffprobe in Docker), else the development copy (ffprobe-static).
+const FFPROBE = process.env.FFPROBE_PATH || (existsSync('/usr/bin/ffprobe') ? '/usr/bin/ffprobe'
+  : await import('ffprobe-static').then(m => m.default?.path || '').catch(() => ''));
+export const ffprobeReady = () => Boolean(FFPROBE);
+
+// How many audio and video streams a file has, read by ffprobe.
+export function streamCounts(file, ctx) {
+  if (!FFPROBE) return Promise.reject(new Error('ffprobe is not installed (set FFPROBE_PATH)'));
+  return new Promise(resolve => {
+    const p = spawn(FFPROBE, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file], { windowsHide: true });
+    ctx?.children?.add(p);
+    let out = '', err = '';
+    p.stdout.on('data', d => { out += d; });
+    p.stderr.on('data', d => { err += d; });
+    p.on('close', code => {
+      ctx?.children?.delete(p);
+      const types = out.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      resolve({ ok: code === 0, audio: types.filter(t => t === 'audio').length, video: types.filter(t => t === 'video').length, error: err.trim() });
+    });
+    p.on('error', e => { ctx?.children?.delete(p); resolve({ ok: false, audio: -1, video: 0, error: String(e) }); });
+  });
+}
+
+// Must be silent: no audio stream at all, and a picture.
+export async function assertSilent(file, ctx) {
+  const s = await streamCounts(file, ctx);
+  if (!s.ok) throw new Error('ffprobe could not read the silent copy: ' + s.error.slice(0, 200));
+  if (s.audio !== 0) throw new Error(`The silent copy still has ${s.audio} audio stream(s)`);
+  if (s.video < 1) throw new Error('The silent copy has no picture');
+  return s;
 }
 
 // One picture (JPEG) at `t` seconds. `long` = size of the longest side.

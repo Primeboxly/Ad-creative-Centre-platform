@@ -13,7 +13,7 @@ import { HttpError } from './errors.js';
 import { listAngles } from './strategy.js';
 import { aiReady, aiMock } from './ai.js';
 import {
-  videoInfo, needsProxy, makeProxy, frameJpeg, grayFrame, measure, dhash, hamming, diff, techScore, planScenes, sceneCuts, sniffVideo,
+  videoInfo, makeSilentCopy, assertSilent, frameJpeg, grayFrame, measure, dhash, hamming, diff, techScore, planScenes, sceneCuts, sniffVideo,
 } from './footage-media.js';
 import { analyzeScenes, matchScenes, anglesHash, productHash, PROMPT_VERSION, CATEGORIES, PLACEMENTS } from './footage-ai.js';
 
@@ -185,19 +185,19 @@ async function processAsset(ctx, options) {
     await frameJpeg(src, Math.min(1, info.duration / 3), thumbFile, 480, ctx);
     const thumbKey = `${keyBase(a)}/thumb.jpg`;
     await storage.put(thumbKey, thumbFile, 'image/jpeg');
-    let proxyKey = '';
-    if (needsProxy(info, a.ext, a.size)) {
-      ctx.check();
-      const proxyFile = join(ctx.work, 'preview.mp4');
-      await makeProxy(src, proxyFile, info, ctx);
-      proxyKey = `${keyBase(a)}/preview.mp4`;
-      await storage.put(proxyKey, proxyFile, 'video/mp4');
-      ctx.log('Made a light preview copy');
-    }
+    // The silent copy: what scenes, previews and future editing use. Every original sound (voice, music, effects,
+    // background) is removed with ffmpeg, then ffprobe checks that no audio stream is left. The original stays untouched.
+    ctx.check();
+    const silentFile = join(ctx.work, 'silent.mp4');
+    const how = await makeSilentCopy(src, silentFile, info, a.ext, a.size, ctx);
+    const check = await assertSilent(silentFile, ctx);
+    const proxyKey = `${keyBase(a)}/silent.mp4`;
+    await storage.put(proxyKey, silentFile, 'video/mp4');
+    ctx.log(`Silent copy ${how === 'copied' ? '(picture kept as is)' : '(re-encoded)'}: ffprobe found ${check.audio} audio / ${check.video} video stream(s)`);
     setAsset(a.id, {
       duration: info.duration, width: info.width, height: info.height, fps: info.fps, vcodec: info.vcodec, acodec: info.acodec,
       has_audio: info.hasAudio ? 1 : 0, rotation: info.rotation, orientation: info.orientation, aspect: info.aspect, bitrate: info.bitrate,
-      thumb_key: thumbKey, proxy_key: proxyKey, meta_done: 1,
+      thumb_key: thumbKey, proxy_key: proxyKey, silent: 1, meta_done: 1,
     });
     ctx.log(`Metadata: ${info.width}x${info.height} ${info.fps}fps ${info.vcodec} ${info.duration.toFixed(1)}s`);
     a = asset(a.id);

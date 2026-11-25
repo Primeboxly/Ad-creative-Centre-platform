@@ -2,7 +2,7 @@
 // - S3-compatible object storage (Railway Bucket, Cloudflare R2, Backblaze B2, AWS S3…) when its settings are given;
 // - otherwise the server's persistent volume (DATA_DIR/store), which also survives deploys on Railway.
 // Files are addressed by a key like "footage/p3/a12/original.mp4". The rest of the app never touches paths directly.
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, renameSync, copyFileSync, statSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, renameSync, copyFileSync, statSync, readdirSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { DATA_DIR } from './paths.js';
@@ -92,6 +92,39 @@ export const storage = {
     if (!useS3) { rmSync(localPath(key), { force: true }); return; }
     const c = await client();
     await c.send(new sdk.DeleteObjectCommand({ Bucket: S3.bucket, Key: key })).catch(e => console.error('S3 delete', key, e.message));
+  },
+
+  // Every stored object under a prefix: [{ key, size }] (used by the data reset to show and delete footage files).
+  async listPrefix(prefix) {
+    if (!useS3) {
+      const out = [], walk = (dir, rel) => {
+        if (!existsSync(dir)) return;
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isDirectory()) walk(join(dir, e.name), `${rel}${e.name}/`);
+          else out.push({ key: rel + e.name, size: statSync(join(dir, e.name)).size });
+        }
+      };
+      walk(localPath(prefix.replace(/\/$/, '')), prefix);
+      return out;
+    }
+    const c = await client();
+    const out = [];
+    let token;
+    do {
+      const r = await c.send(new sdk.ListObjectsV2Command({ Bucket: S3.bucket, Prefix: prefix, ContinuationToken: token }));
+      for (const o of r.Contents || []) out.push({ key: o.Key, size: o.Size || 0 });
+      token = r.IsTruncated ? r.NextContinuationToken : undefined;
+    } while (token);
+    return out;
+  },
+
+  // Delete ALL footage files (data reset only).
+  async removeAllUnder(prefix) {
+    if (prefix !== 'footage/') throw new Error('Refusing to delete ' + prefix);
+    if (!useS3) { rmSync(localPath('footage'), { recursive: true, force: true }); return; }
+    const c = await client();
+    const keys = (await this.listPrefix(prefix)).map(o => ({ Key: o.key }));
+    for (let i = 0; i < keys.length; i += 1000) await c.send(new sdk.DeleteObjectsCommand({ Bucket: S3.bucket, Delete: { Objects: keys.slice(i, i + 1000) } }));
   },
 
   // Delete everything under a folder-like prefix (e.g. one video's original, preview and pictures).

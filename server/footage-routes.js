@@ -1,13 +1,12 @@
 // Footage library API. Every route is behind sign-in (/api and /media need a session).
 import multer from 'multer';
-import { mkdirSync, rmSync, renameSync, copyFileSync } from 'node:fs';
+import { mkdirSync, rmSync, renameSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { db } from './db.js';
-import { DATA_DIR, RAW_DIR } from './paths.js';
+import { DATA_DIR } from './paths.js';
 import { HttpError } from './errors.js';
 import { storage } from './storage.js';
 import { PRICES } from './ai.js';
-import { queueSplits, rawName } from './split.js';
 import {
   CFG, FORMATS, STAGE_LABEL, enqueue, fileSha256, sniffFile, assetOr404, deleteAsset, retryAsset, cancelJobsOf, anglesStale,
   sceneOr404, splitScene, mergeWithNext, trimScene, reanalyze, updateScene,
@@ -89,9 +88,9 @@ export function mountFootage(app, { h, idParam, str, productOr404 }) {
       assets: assets.map(a => {
         const c = counts.find(x => x.asset_id === a.id) || { n: 0, analyzed: 0, failed: 0, excluded: 0 };
         const cost = costs.find(x => x.ref === `asset:${a.id}`);
-        const { incoming, storage_key, proxy_key, thumb_key, sha256, ...pub } = a;
+        const { incoming, storage_key, proxy_key, thumb_key, sha256, ...pub } = a; // storage keys stay on the server
         return {
-          ...pub, has_proxy: !!proxy_key, stored: !!storage_key, fingerprint: sha256.slice(0, 12),
+          ...pub, silent: !!a.silent, stored: !!storage_key, fingerprint: sha256.slice(0, 12),
           scenes: c.n, analyzed: c.analyzed || 0, failed_scenes: c.failed || 0, excluded: c.excluded || 0,
           ai_cost: cost ? Math.round(cost.usd * 1000) / 1000 : 0, ai_calls: cost?.calls || 0,
           job: jobs.find(j => j.asset_id === a.id) || null,
@@ -133,26 +132,14 @@ export function mountFootage(app, { h, idParam, str, productOr404 }) {
     const a = assetOr404(idParam(req.params.id));
     res.json(db.prepare(`SELECT id, kind, status, stage, progress, attempts, error, log, created_at, started_at, finished_at FROM footage_jobs WHERE asset_id = ? ORDER BY id DESC LIMIT 10`).all(a.id));
   });
-  // The same video also goes to the current ad maker (auto-split into clips).
-  app.post('/api/footage/:id/to-clips', h(async (req, res) => {
-    const a = assetOr404(idParam(req.params.id));
-    if (!a.storage_key) throw new HttpError(409, 'The video is still being saved: try again in a moment');
-    const file = rawName(a.product_id, a.original_name || a.name + a.ext);
-    const dest = join(RAW_DIR, file);
-    if (storage.driver === 'volume') copyFileSync(await storage.toLocal(a.storage_key), dest);
-    else await storage.toLocal(a.storage_key, dest);
-    db.prepare(`INSERT INTO raws (product_id, file, original_name, uploaded_by) VALUES (?,?,?,?)`).run(a.product_id, file, a.original_name || a.name + a.ext, req.user.id);
-    queueSplits();
-    res.status(201).json({ ok: true });
-  }));
-
   // Video, preview and pictures (served from the volume, or a short-lived signed S3 link).
   app.get('/media/footage/:id/:what', h(async (req, res) => {
     const a = assetOr404(idParam(req.params.id));
     const what = req.params.what;
     if (what === 'thumb') { if (!a.thumb_key) throw new HttpError(404, 'No picture yet'); return storage.serve(res, a.thumb_key, { type: 'image/jpeg', maxAge: 3600 }); }
     if (!a.storage_key) throw new HttpError(404, 'The video is still being saved');
-    if (what === 'preview') return storage.serve(res, a.proxy_key || a.storage_key, { type: a.proxy_key ? 'video/mp4' : a.mime });
+    // Previews always play the silent copy (never the original, which may have sound).
+    if (what === 'preview') { if (!a.proxy_key || !a.silent) throw new HttpError(404, 'The silent copy is not ready yet'); return storage.serve(res, a.proxy_key, { type: 'video/mp4' }); }
     if (what === 'original') return storage.serve(res, a.storage_key, { type: a.mime, download: req.query.download ? (a.original_name || a.name + a.ext) : undefined });
     throw new HttpError(404, 'Not found');
   }));

@@ -2,11 +2,10 @@
 
 On each product page, tab **🎞 Footage**, there are now three sub-tabs:
 
-- **🎬 Original videos**: upload (drag and drop, up to 20 at a time, MP4 / MOV / WebM), preview, rename, delete, download the original, search, filter by status, follow progress, cancel, retry, see the processing log and the AI cost of each video. **✂️** also sends a video to the current ad maker.
+- **🎬 Original videos**: upload (drag and drop, up to 20 at a time, MP4 / MOV / WebM), preview, rename, delete, download the original, search, filter by status, follow progress, cancel, retry, see the processing log and the AI cost of each video.
 - **✨ AI scenes**: every scene of every video, with a thumbnail (hover = it plays just those seconds), time range, AI description, categories, quality score, flags (watermark, text on screen, staged, low quality, look-alike) and matching marketing angles.
   Filters: search, video, category, marketing angle, quality, length, format, analysis status, favourites, excluded. Sort by quality, video order, length or angle match.
   ★ marks a favourite; 🚫 excludes a scene from future ads. Click a scene to open the **inspector**.
-- **✂️ Clips for the ad maker**: the existing clip library used by "Create ads" (unchanged).
 
 **Scene inspector**: the player loops the scene inside the whole video (timeline bar). You can split at the current time, set start/end, merge with the next scene, re-analyse, favourite, exclude, and edit the description, the short "matching" line, categories, tags, ad placements and linked angles (with a score). Edits change only the scene's times and data: **the original video is never modified**.
 
@@ -16,7 +15,7 @@ On each product page, tab **🎞 Footage**, there are now three sub-tabs:
 
 1. **Upload checks**: extension (.mp4 .mov .webm), the file's first bytes (a renamed text file is refused), size limit (`FOOTAGE_MAX_MB`), SHA-256 fingerprint: the same file twice in a product is refused as a duplicate.
 2. **Saving**: the original is stored for good (S3 bucket, or the Railway volume).
-3. **Metadata** (ffmpeg): duration, resolution, aspect ratio, frame rate, size, bitrate, sound, video/audio codec, rotation, orientation, thumbnail. A light **preview copy** (H.264 MP4, max 1280 px) is made only when needed (not MP4/H.264, very large or heavy files); the original stays as uploaded.
+3. **Metadata** (ffmpeg): duration, resolution, aspect ratio, frame rate, size, bitrate, sound, video/audio codec, rotation, orientation, thumbnail. A **silent copy** is always made: ffmpeg keeps only the picture (every audio stream removed: voice, music, effects, background), then **ffprobe checks that it has 0 audio streams** (the video fails otherwise). Light H.264 MP4 videos keep their picture as it is; others become H.264 MP4, max 1280 px. Previews, scenes and future editing use only this silent copy; the original stays as uploaded (downloadable).
 4. **Scenes** (ffmpeg scene-change detection): scenes shorter than `FOOTAGE_MIN_SCENE` are merged with a neighbour, scenes longer than `FOOTAGE_MAX_SCENE` are cut into equal parts. Scenes are **time ranges** (no video file per scene). For each scene: thumbnail, measured sharpness / brightness / contrast / movement, a picture fingerprint (to find duplicates and look-alikes, never deleted, only flagged), and a measured quality score.
 5. **AI analysis** (Claude, multimodal): `FOOTAGE_FRAMES_PER_SCENE` frames per scene (start → end, longest side `FOOTAGE_FRAME_SIZE` px) plus the measurements, several scenes per call. Returns checked JSON: description, matching line, objects, product visible, features shown, benefits shown, human interaction, place, camera movement, composition, text on screen, watermark, footage type (real-customer style / staged / synthetic), relevance to the product, quality parts + score + note, 1-4 categories, tags, ad placements with a fit %, and marketing angles with a score and reason.
    Rules given to the AI: only what is visible; no invented features; no identification of people and no guesses about sensitive attributes; staged or synthetic footage is never a customer testimonial.
@@ -73,8 +72,8 @@ The S3 names `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL`, `
 | `POST /api/products/:id/footage` | upload (`files`, up to 20) → `{ added, duplicates, rejected }` |
 | `GET /api/products/:id/footage` | videos with status, progress, scene counts, AI cost, last job; angles; stale count |
 | `PATCH /api/footage/:id` · `DELETE /api/footage/:id` | rename · delete (files too) |
-| `POST /api/footage/:id/retry` · `/cancel` · `/to-clips` · `GET /api/footage/:id/jobs` | retry · cancel · send to ad maker · logs |
-| `GET /media/footage/:id/preview` · `/original` · `/thumb` · `GET /media/scene/:id/thumb` | media (volume or signed S3 link) |
+| `POST /api/footage/:id/retry` · `/cancel` · `GET /api/footage/:id/jobs` | retry · cancel · logs |
+| `GET /media/footage/:id/preview` (silent copy) · `/original` · `/thumb` · `GET /media/scene/:id/thumb` | media (volume or signed S3 link) |
 | `GET /api/products/:id/scenes` · `GET/PATCH /api/scenes/:id` | scenes · one scene · edit |
 | `POST /api/scenes/:id/split` `{at}` · `/merge` · `/trim` `{start,end}` · `/reanalyze` | non-destructive edits |
 | `POST /api/products/:id/scenes/rematch` | re-link scenes to the current angles |
@@ -97,5 +96,4 @@ Checked by hand with generated MP4 (vertical, 4 scenes, sound), MOV (MPEG-4, hor
 - The real AI analysis was tested in test mode only (no key on the development machine): check the first real videos.
 - "Matching with script sentences" is a simple word match for now (free); a later module can use the AI for it.
 - Camera stability is judged by the AI from the frames (the measured "movement" is picture change, not shake).
-- Videos already cut into clips before this module are not imported into the library automatically (upload them again, or keep using them in the ad maker).
 - Team members share all products (as before): every signed-in member of the team can see every product's footage; people outside the team cannot.

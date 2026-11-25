@@ -85,3 +85,24 @@ test('real video: details, scene changes and a grey frame', async () => {
   assert.equal(g.w, 160); assert.ok(g.h > 250);
   assert.ok(measure(g).contrast < 5); // plain red picture
 });
+
+test('silent copy: every audio stream removed, checked with ffprobe (copied and re-encoded)', async () => {
+  const { makeSilentCopy, assertSilent, streamCounts, ffprobeReady } = await import('../server/footage-media.js');
+  assert.ok(ffprobeReady(), 'ffprobe must be available');
+  const dir = mkdtempSync(join(tmpdir(), 'acc-silent-'));
+  // A video with TWO audio tracks (voice + music), as phones and editors sometimes make.
+  const src = join(dir, 'loud.mp4');
+  const r = await ff(['-y', '-f', 'lavfi', '-i', 'testsrc=size=320x568:rate=25:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=2', '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src]);
+  assert.equal(r.code, 0);
+  assert.equal((await streamCounts(src)).audio, 2);
+  const info = await videoInfo(src);
+  const fast = join(dir, 'silent-copy.mp4');
+  assert.equal(await makeSilentCopy(src, fast, info, '.mp4', 100e3, null), 'copied');
+  const a = await assertSilent(fast);
+  assert.equal(a.audio, 0); assert.equal(a.video, 1);
+  const enc = join(dir, 'silent-enc.mp4');
+  assert.equal(await makeSilentCopy(src, enc, { ...info, vcodec: 'mpeg4' }, '.mov', 100e3, null), 'encoded');
+  assert.equal((await assertSilent(enc)).audio, 0);
+  await assert.rejects(() => assertSilent(src), /audio stream/);
+});
