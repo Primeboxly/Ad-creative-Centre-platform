@@ -311,3 +311,81 @@ CREATE TABLE IF NOT EXISTS creative_briefs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (project_id, version)
 );`);
+
+// ---------- Module 4: AI script & storyboard (new tables only) ----------
+db.exec(`
+-- One script & storyboard plan per creative project, Creative Brief version and planned video (variation).
+CREATE TABLE IF NOT EXISTS sb_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  brief_id INTEGER NOT NULL REFERENCES creative_briefs(id) ON DELETE CASCADE,
+  brief_version INTEGER NOT NULL,
+  variation_index INTEGER NOT NULL DEFAULT 1,       -- which planned video of the brief
+  status TEXT NOT NULL DEFAULT 'draft',             -- draft|generating_strategy|generating_hooks|generating_script|matching_footage|generating_storyboard|validating|ready|approved|failed
+  error TEXT NOT NULL DEFAULT '',
+  approved_version_id INTEGER,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (project_id, brief_id, variation_index)
+);
+-- Versions of a plan. The newest unfrozen one is the working draft; frozen versions never change.
+-- strategy / hooks / script / storyboard are JSON documents checked against server/sb-schemas.js.
+CREATE TABLE IF NOT EXISTS sb_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES sb_plans(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL,
+  parent_id INTEGER,                                 -- the version it was made from
+  label TEXT NOT NULL DEFAULT '',
+  frozen INTEGER NOT NULL DEFAULT 0,
+  approved INTEGER NOT NULL DEFAULT 0,
+  strategy TEXT NOT NULL DEFAULT '',
+  strategy_rev INTEGER NOT NULL DEFAULT 0,           -- bumps each time the strategy changes
+  hooks TEXT NOT NULL DEFAULT '',
+  script TEXT NOT NULL DEFAULT '',
+  storyboard TEXT NOT NULL DEFAULT '',
+  validation TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (plan_id, number)
+);
+-- Footage used by each version's shots (keeps the links to Module 2 scenes checkable).
+CREATE TABLE IF NOT EXISTS sb_version_scenes (
+  version_id INTEGER NOT NULL REFERENCES sb_versions(id) ON DELETE CASCADE,
+  shot_id TEXT NOT NULL,
+  scene_id INTEGER NOT NULL REFERENCES footage_scenes(id) ON DELETE CASCADE,
+  PRIMARY KEY (version_id, shot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sbvs_scene ON sb_version_scenes(scene_id);
+-- Generation work (in the background, survives restarts).
+CREATE TABLE IF NOT EXISTS sb_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES sb_plans(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                                -- full|strategy|hooks|hook|script|segment|storyboard|shot|match
+  target TEXT NOT NULL DEFAULT '',
+  options TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'queued',             -- queued|running|completed|failed|cancelled
+  stage TEXT NOT NULL DEFAULT '',
+  progress REAL NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 2,
+  error TEXT NOT NULL DEFAULT '',
+  log TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sbj_status ON sb_jobs(status, id);
+-- Approvals: who approved which version, and the production plan handed to Modules 5-8.
+CREATE TABLE IF NOT EXISTS sb_approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL REFERENCES sb_plans(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES sb_versions(id) ON DELETE CASCADE,
+  brief_id INTEGER NOT NULL REFERENCES creative_briefs(id) ON DELETE CASCADE,
+  production_plan TEXT NOT NULL,
+  approved_by INTEGER REFERENCES users(id),
+  approved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// A restart stops generation: running work goes back to the queue.
+db.exec(`UPDATE sb_jobs SET status = 'queued' WHERE status = 'running';`);

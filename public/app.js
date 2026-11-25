@@ -96,6 +96,7 @@ function route() {
   clearInterval(state.poll);
   document.body.classList.remove('side-open');
   const [view, id, tab] = (location.hash.slice(1) || 'dashboard').split('/');
+  clearTimeout(state.sbTimer);
   if (state.cp && view !== 'project') { cpFlush(); state.cp = null; } // leaving a project: send unsaved changes
   const nav = view === 'product' ? (tab === 'strategy' ? 'angles' : tab === 'footage' ? 'footage' : 'products') : view === 'project' ? 'projects' : view;
   document.querySelectorAll('.side-nav a').forEach(a => a.classList.toggle('on', a.dataset.go === nav));
@@ -911,7 +912,7 @@ async function renderHub(kind) {
 }
 
 // ---------- Creative projects (Module 3): list, new project, 6-step workflow, Creative Brief ----------
-const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅']];
+const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝']];
 const CP_STATUS = { draft: '📝 Draft', ready: '✅ Brief saved' };
 const AIR = 'ai_recommended';
 let REG = null;
@@ -1018,7 +1019,7 @@ function drawProject(keepScroll = false) {
   const y = window.scrollY, active = document.activeElement?.id;
   const errs = st.validation.errors, warns = st.validation.warnings;
   const stepIssues = k => errs.filter(e => e.step === k).length;
-  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready' };
+  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false };
   v.innerHTML = `
     <a class="back" href="#projects">← Creative projects</a>
     <section class="ag-hero cp-hero">
@@ -1045,7 +1046,7 @@ function drawProject(keepScroll = false) {
     <div class="cp-nav">
       ${state.cpStep !== 'product' ? '<button class="btn" id="cpPrev">← Back</button>' : '<span></span>'}
       <span class="muted small">${errs.length ? `⛔ ${errs.length} blocking · ` : ''}${warns.length ? `⚠ ${warns.length} warning${warns.length > 1 ? 's' : ''}` : errs.length ? '' : '✓ Ready'}</span>
-      ${state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>`}
+      ${state.cpStep === 'script' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
     </div>`;
   const go = async k => { await cpFlush(); state.cpStep = k; location.hash = `project/${st.project.id}/${k}`; };
   v.querySelectorAll('[data-cpstep]').forEach(b => b.onclick = () => go(b.dataset.cpstep));
@@ -1053,6 +1054,7 @@ function drawProject(keepScroll = false) {
   $('#cpPrev')?.addEventListener('click', () => go(CP_STEPS[idx - 1][0]));
   $('#cpNext')?.addEventListener('click', () => go(CP_STEPS[idx + 1][0]));
   $('#cpBrief')?.addEventListener('click', cpSaveBrief);
+  $('#cpToScript')?.addEventListener('click', () => go('script'));
   $('#cpName').onchange = e => cpSave({ name: e.target.value });
   $('#cpDraft')?.addEventListener('click', async () => { await cpFlush(); await cpSave({ settings: { step: state.cpStep } }, { now: true }); toast('Draft saved'); });
   $('#cpDup').onclick = async () => { try { await cpFlush(); const { id } = await api(`/api/creative-projects/${st.project.id}/duplicate`, { method: 'POST' }); toast('Project duplicated (no media copied)'); location.hash = `project/${id}/review`; } catch (e) { fail(e); } };
@@ -1060,7 +1062,7 @@ function drawProject(keepScroll = false) {
     if (!confirm(`Delete the project "${st.project.name}" and its saved briefs? Products and footage are not touched.`)) return;
     try { await api(`/api/creative-projects/${st.project.id}`, { method: 'DELETE' }); toast('Project deleted'); location.hash = 'projects'; refreshSide(); } catch (e) { fail(e); }
   });
-  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview })[state.cpStep]();
+  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript })[state.cpStep]();
   if (!st.can_edit) $('#cpBody').querySelectorAll('input, select, textarea, button:not([data-view])').forEach(x => { x.disabled = true; });
   if (keepScroll) { window.scrollTo(0, y); if (active) { const el = document.getElementById(active); if (el && el.type !== 'checkbox') { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } } }
 }
@@ -1404,6 +1406,314 @@ async function cpSaveBrief() {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { fail(new Error(j.error || 'Could not save')); state.cp = await api(`/api/creative-projects/${st.project.id}`); return drawProject(true); }
   state.cp = j.state; toast(`Creative Brief v${j.version} saved`); drawProject(true); refreshSide();
+}
+
+// ---------- Script & storyboard (Module 4): step 7 of a creative project ----------
+const SB_ROLES = { hook: 'Hook', problem: 'Problem', intro: 'Product Introduction', solution: 'Solution', demonstration: 'Demonstration', feature: 'Feature', benefit: 'Benefit', objection: 'Objection Handling', offer: 'Offer', cta: 'CTA', supporting: 'Supporting Visual' };
+const SB_STATUS = { draft: 'Draft', generating_strategy: 'Generating strategy…', generating_hooks: 'Generating hooks…', generating_script: 'Writing the script…', matching_footage: 'Matching footage…', generating_storyboard: 'Building the storyboard…', validating: 'Validating…', ready: 'Ready for review', approved: 'Approved', failed: 'Failed' };
+const SB_TRANS = { hard_cut: 'Hard cut', smooth_cut: 'Smooth cut', fade: 'Fade', crossfade: 'Crossfade' };
+const SB_MOTION = { none: 'No motion', subtle_zoom_in: 'Subtle zoom in', subtle_zoom_out: 'Subtle zoom out', reframe: 'Reframe' };
+const SB_CROP = { none: 'No crop', product_focus: 'Product-focused crop', center: 'Center', top: 'Top', bottom: 'Bottom' };
+const busyJob = sb => ['queued', 'running'].includes(sb?.job?.status);
+
+async function cpScript() {
+  const st = state.cp, body = $('#cpBody');
+  if (!st.briefs.length) {
+    body.innerHTML = `<div class="card s-empty"><div class="s-empty-ic">📝</div><h2>Save the Creative Brief first</h2><p class="muted">The script and storyboard are written from the saved Creative Brief (step 6).</p><button class="btn primary big" id="sbToReview">Go to Review & save</button></div>`;
+    $('#sbToReview').onclick = () => { location.hash = `project/${st.project.id}/review`; };
+    return;
+  }
+  const brief = await api(`/api/creative-projects/${st.project.id}/brief`).catch(() => null);
+  if (!brief) return;
+  state.sbBrief = brief;
+  const videos = brief.brief.variations.videos;
+  const plans = (await api(`/api/creative-projects/${st.project.id}/sb`)).plans.filter(p => p.brief_version === brief.version);
+  state.sbVar = videos.some(v => v.index === state.sbVar) ? state.sbVar : 1;
+  const plan = plans.find(p => p.variation_index === state.sbVar);
+  state.sb = plan ? await api(`/api/sb-plans/${plan.id}`) : null;
+  sbDraw();
+}
+
+function sbDraw(keepScroll = true) {
+  const y = window.scrollY;
+  const st = state.cp, sb = state.sb, brief = state.sbBrief, videos = brief.brief.variations.videos;
+  const v = videos.find(x => x.index === state.sbVar) || videos[0];
+  const angleName = id => brief.brief.marketing_angles.find(a => a.id === id)?.name || id;
+  const busy = busyJob(sb), edit = st.can_edit && !busy;
+  const head = `
+    <section class="card sb-head">
+      <div class="sb-head-row">
+        <label>Planned video <select id="sbVar">${videos.map(x => `<option value="${x.index}" ${x.index === state.sbVar ? 'selected' : ''}>Video ${x.index} · ${esc(x.angle_ids.map(angleName).join(' + '))} · ${esc(typeName(x.creative_type))}${x.hook_style ? ` · ${esc(REG.hookStyles[x.hook_style] || x.hook_style)}` : ''}</option>`).join('')}</select></label>
+        <span class="small muted">Brief v${brief.version} · ${videos.length} planned video${videos.length > 1 ? 's' : ''} (bulk generation comes in Module 9)</span>
+        ${sb ? `<span class="pst ${sb.plan.status === 'approved' ? 'st-scaling' : sb.plan.status === 'failed' ? 'st-paused' : 'st-idea'}">${SB_STATUS[sb.plan.status] || sb.plan.status}</span>` : ''}
+      </div>
+      ${sb?.plan.newer_brief ? `<div class="cp-warn">⚠ A newer Creative Brief (v${sb.plan.newer_brief}) exists: this plan uses v${sb.plan.brief_version}.</div>` : ''}
+      ${busy ? `<div class="sb-progress"><div class="ai-orb"><span></span><span></span><span></span></div><div><b>${SB_STATUS[sb.plan.status] || 'Working…'}</b><div class="fv-bar"><i style="width:${Math.max(5, Math.round((sb.job.progress || 0) * 100))}%"></i></div></div><button class="btn sm" id="sbCancel">⏹ Cancel</button></div>` : ''}
+      ${sb?.job?.status === 'failed' ? `<div class="cp-err">⛔ ${esc(sb.job.error)} <a id="sbRetry">↻ Try again</a></div>` : ''}
+      <div class="sb-head-row">
+        ${!sb?.script ? `<button class="btn primary big" id="sbGen" ${st.can_edit && !busy ? '' : 'disabled'}>✨ Generate Script & Storyboard</button><span class="small muted">One click: strategy → 5 hooks → best hook → script → footage → storyboard → checks. Nothing is asked in between.</span>`
+          : `<button class="btn" id="sbGenAll" ${edit ? '' : 'disabled'} title="Regenerate everything (locked content is kept)">↻ Regenerate all</button>`}
+        ${sb ? `<span class="small muted sb-cost">AI: ${sb.cost.calls} call${sb.cost.calls === 1 ? '' : 's'} · $${sb.cost.usd.toFixed(3)}</span>` : ''}
+      </div>
+    </section>`;
+  if (!sb || !sb.script) {
+    $('#cpBody').innerHTML = head + `<div class="card s-empty"><div class="s-empty-ic">🎬</div><h2>No script yet for video ${v.index}</h2><p class="muted">The AI Creative Director uses the saved brief: ${esc(typeName(v.creative_type))}, ${esc(v.angle_ids.map(angleName).join(' + '))}, ${brief.brief.format.duration_seconds} s, ${esc(brief.brief.format.aspect_ratio)}, ${brief.brief.footage.scene_ids.length} eligible scenes.</p></div>`;
+    sbWire();
+    if (busy) sbPoll();
+    return;
+  }
+  const c = sb.context, s = sb.script, b = sb.storyboard, val = sb.validation || { errors: [], warnings: [] };
+  const diff = s.diff_seconds;
+  const sceneOf = id => sb.scenes.find(x => x.id === id);
+  $('#cpBody').innerHTML = head + `
+    <section class="card"><div class="sec-h"><div><h2>📋 Creative summary</h2><small>From Creative Brief v${sb.plan.brief_version} · version v${sb.version.number}${sb.version.approved ? ' (approved)' : sb.version.frozen ? ' (frozen)' : ' (draft)'}</small></div></div>
+      <div class="insp-facts">${[['Product', c.product], ['Marketing angle', c.angles.map(a => a.name).join(' + ')], ['Creative type', c.type.name], ['Target market', c.country || '—'], ['Language', `${c.language}${c.dialect ? ` (${c.dialect})` : ''}`], ['Duration', `${c.duration} s`], ['Aspect ratio', c.aspect], ['Footage', `${c.footage_mode} · ${c.usable_scenes} usable scenes`]].map(([k, x]) => `<div><span>${k}</span><p>${esc(x)}</p></div>`).join('')}</div>
+    </section>
+
+    <details class="card sb-sec" ${state.sbOpenStrategy ? 'open' : ''} id="sbStratBox"><summary><h2>🧭 Creative strategy</h2> <small class="muted">${esc(sb.strategy?.main_message || '')}</small></summary>
+      ${sb.strategy ? `<div class="insp-facts sb-strategy">${[['main_message', 'Main message'], ['primary_pain_point', 'Primary pain point'], ['main_benefit', 'Main benefit'], ['emotional_approach', 'Emotional approach'], ['hook_strategy', 'Hook strategy'], ['selling_approach', 'Selling approach'], ['visual_approach', 'Visual storytelling'], ['cta_strategy', 'CTA strategy']].map(([k, l]) => `<div><span>${l}</span>${state.sbEditStrategy ? `<textarea data-strat="${k}" rows="2">${esc(sb.strategy[k])}</textarea>` : `<p>${esc(sb.strategy[k])}</p>`}</div>`).join('')}
+        <div><span>Awareness level</span><p>${esc((sb.strategy.awareness_level || '').replace(/_/g, ' '))}</p></div>
+        <div class="wide"><span>Narrative</span><p>${sb.strategy.narrative.map(n => `<b>${esc(SB_ROLES[n.role] || n.role)}</b>: ${esc(n.purpose)}`).join(' → ')}</p></div>
+        ${sb.strategy.missing_visuals.length ? `<div class="wide"><span>Missing visuals (and supported alternatives)</span><p>${sb.strategy.missing_visuals.map(m => `⚠ ${esc(m.need)} → ${esc(m.alternative)}`).join('<br>')}</p></div>` : ''}
+        ${sb.strategy.claims_to_avoid.length ? `<div class="wide"><span>Claims to avoid</span><p>${sb.strategy.claims_to_avoid.map(esc).join(' · ')}</p></div>` : ''}
+      </div>` : ''}
+      <div class="row">${state.sbEditStrategy ? '<button class="btn primary sm" id="sbStratSave">Save strategy</button><button class="btn sm" id="sbStratCancel">Cancel</button>' : `<button class="btn sm" id="sbStratEdit" ${edit ? '' : 'disabled'}>✏️ Edit</button><button class="btn sm" data-job="strategy" ${edit ? '' : 'disabled'}>↻ Regenerate strategy</button>`}</div>
+    </details>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🪝 Hooks</h2><small>${sb.hooks.auto ? '✨ The AI chose the best one: pick another any time.' : 'Chosen by the team.'}</small></div>
+      <div class="row"><label class="fs-tg"><input type="checkbox" id="sbAuto" ${sb.hooks.auto ? 'checked' : ''} ${edit ? '' : 'disabled'}> Let the AI choose</label><button class="btn sm" data-job="hooks" ${edit ? '' : 'disabled'}>↻ New hooks</button></div></div>
+      <div class="sb-hooks">${sb.hooks.items.map(h => `<article class="sb-hook ${h.id === sb.hooks.selected ? 'on' : ''}" data-hook="${h.id}">
+        <div class="sb-hook-top"><span class="chip">${esc(REG.hookStyles[h.style] || h.style.replace(/_/g, ' '))}</span><span class="small muted">~${h.est_seconds} s · angle ${h.angle_relevance}%</span>${h.locked ? '🔒' : ''}</div>
+        ${state.sbEditHook === h.id ? `<textarea data-hooktext rows="2">${esc(h.text)}</textarea><input data-hookost value="${esc(h.on_screen_text)}" placeholder="On-screen text"><div class="row"><button class="btn sm primary" data-hooksave>Save</button><button class="btn sm" data-hookcancel>Cancel</button></div>`
+          : `<p class="sb-hook-text">“${esc(h.text)}”</p><p class="small"><b>Opening:</b> ${esc(h.visual_opening)}</p>${h.on_screen_text ? `<p class="small"><b>On screen:</b> ${esc(h.on_screen_text)}</p>` : ''}<p class="small muted">${esc(h.explanation)}</p>
+          <div class="sb-mini">${h.scene_ids.map(id => `<img src="/media/scene/${id}/thumb" alt="" title="Scene ${id}">`).join('')}</div>`}
+        <div class="row">${h.id === sb.hooks.selected ? '<b class="ok-t">✓ Selected</b>' : `<button class="btn sm" data-hooksel ${edit ? '' : 'disabled'}>Use this hook</button>`}
+          <button class="icon-btn sm" data-hookedit title="Edit" ${edit ? '' : 'disabled'}>✏️</button><button class="icon-btn sm" data-hookregen title="Regenerate this hook" ${edit && !h.locked ? '' : 'disabled'}>↻</button></div>
+      </article>`).join('')}</div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>📝 Script</h2><small>${esc(c.type.name)}: ${s.structure.map(esc).join(' → ')}</small></div>
+      <div class="row"><button class="btn sm" id="sbCopy">📋 Copy</button><button class="btn sm" id="sbWhole" ${edit ? '' : 'disabled'}>✏️ Edit whole script</button><button class="btn sm" data-job="script" ${edit ? '' : 'disabled'}>↻ Regenerate script</button></div></div>
+      <div class="sb-stats"><span>📝 ${s.words} words</span><span>🎙 ~${s.est_seconds} s estimated</span><span>🎯 ${s.target_seconds} s target</span><span class="${Math.abs(diff) > s.target_seconds * 0.12 ? 'bad' : 'ok'}">${diff > 0 ? '+' : ''}${diff} s</span><span class="muted">Provisional: the real voice-over (Module 5) sets the final timing.</span></div>
+      ${state.sbWhole ? `<textarea id="sbWholeText" rows="10">${esc(s.segments.map(x => x.text).join('\n\n'))}</textarea><p class="small muted">One paragraph per segment (blank line between). Locked segments keep their text.</p><div class="row"><button class="btn primary sm" id="sbWholeSave">Save script</button><button class="btn sm" id="sbWholeCancel">Cancel</button></div>`
+        : `<div class="sb-full">${s.segments.map(x => esc(x.text)).join(' ')}</div>`}
+      <div class="sb-segs">${s.segments.map((x, i) => `<div class="sb-seg ${x.locked ? 'locked' : ''}" data-seg="${x.id}">
+        <div class="sb-seg-l"><select data-segrole ${edit && !x.locked ? '' : 'disabled'}>${Object.entries(SB_ROLES).map(([k, l]) => `<option value="${k}" ${x.role === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <small>${x.est_start}–${x.est_end} s · ${x.words} w</small>${x.source === 'user' ? '<small>✏️ edited</small>' : ''}</div>
+        <div class="sb-seg-m"><textarea data-segtext rows="2" ${edit && !x.locked ? '' : 'disabled'}>${esc(x.text)}</textarea>
+          <input data-segost value="${esc(x.on_screen_text)}" placeholder="On-screen text (optional)" ${edit && !x.locked ? '' : 'disabled'}>
+          ${x.visual_intent ? `<small class="muted">🎬 ${esc(x.visual_intent)}</small>` : ''}</div>
+        <div class="sb-seg-r">
+          <button class="icon-btn sm" data-seglock title="${x.locked ? 'Unlock' : 'Lock (kept on regeneration)'}" ${edit ? '' : 'disabled'}>${x.locked ? '🔒' : '🔓'}</button>
+          <button class="icon-btn sm" data-segup title="Move up" ${edit && i ? '' : 'disabled'}>↑</button><button class="icon-btn sm" data-segdown title="Move down" ${edit && i < s.segments.length - 1 ? '' : 'disabled'}>↓</button>
+          <button class="icon-btn sm" data-segregen title="Rewrite this segment" ${edit && !x.locked ? '' : 'disabled'}>↻</button>
+          <button class="icon-btn sm" data-segmatch title="Find footage again for this segment" ${edit ? '' : 'disabled'}>🎞</button>
+          <button class="icon-btn sm" data-segadd title="Add a segment after" ${edit ? '' : 'disabled'}>＋</button>
+          <button class="icon-btn sm danger" data-segdel title="Remove" ${edit && !x.locked && s.segments.length > 1 ? '' : 'disabled'}>🗑</button></div>
+      </div>`).join('')}</div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎬 Visual storyboard</h2><small>${b ? `${b.shots.length} shots · ${b.total_seconds} s · ${esc(c.pace)} pace · source footage never changes` : 'Not built yet'}</small></div>
+      <div class="row"><button class="btn sm" data-job="storyboard" ${edit && s ? '' : 'disabled'}>↻ Regenerate storyboard (keep script)</button></div></div>
+      ${b ? `<div class="sb-timeline">${b.shots.map(x => `<span class="r-${x.role}" style="flex:${Math.max(0.3, x.duration)}" title="${esc(SB_ROLES[x.role] || x.role)} · ${x.timeline_start}–${x.timeline_end} s">${x.order}</span>`).join('')}</div>
+      ${b.missing.length ? `<div class="cp-issues">${b.missing.map(m => `<div class="cp-warn">⚠ No footage for segment ${esc(m.segment_id)}: ${esc(m.need)}<br><small>Suggestion: ${esc(m.alternative)}</small></div>`).join('')}</div>` : ''}
+      <div class="sb-shots">${b.shots.map((x, i) => { const sc = sceneOf(x.scene_id); return `<article class="sb-shot ${x.locked ? 'locked' : ''}" data-shot="${x.id}">
+        <div class="sb-shot-media" data-asset="${x.asset_id}" data-a="${x.source_start}" data-b="${x.source_end}"><img src="/media/scene/${x.scene_id}/thumb" alt="" loading="lazy">
+          <span class="fs-q ${qClass(x.confidence)}" title="Match with the spoken text">${x.confidence}</span><span class="fv-dur">${x.duration.toFixed(1)}s</span><span class="sb-n">#${x.order}</span></div>
+        <div class="sb-shot-b">
+          <div class="sb-times"><span>⏱ ${x.timeline_start}–${x.timeline_end} s</span><span>🎞 scene ${x.scene_id}: ${x.source_start}–${x.source_end} s</span></div>
+          <div class="chip">${esc(SB_ROLES[x.role] || x.role)}</div>
+          ${x.voiceover ? `<p class="sb-vo">🎙 ${esc(x.voiceover)}</p>` : ''}
+          <input data-shotost value="${esc(x.on_screen_text)}" placeholder="On-screen text" ${edit ? '' : 'disabled'}>
+          <p class="small muted">${esc(x.visual_description || sc?.description || '')}</p>
+          <p class="small"><b>Why:</b> ${esc(x.reason)}</p>
+          <div class="sb-edit"><select data-shotf="transition" ${edit ? '' : 'disabled'}>${Object.entries(SB_TRANS).map(([k, l]) => `<option value="${k}" ${x.transition === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <select data-shotf="motion" ${edit ? '' : 'disabled'}>${Object.entries(SB_MOTION).map(([k, l]) => `<option value="${k}" ${x.motion === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <select data-shotf="crop" ${edit ? '' : 'disabled'}>${Object.entries(SB_CROP).map(([k, l]) => `<option value="${k}" ${x.crop === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          ${x.warnings.length ? `<div class="sb-warn">${x.warnings.map(w => `⚠ ${esc(w)}`).join('<br>')}</div>` : ''}
+          ${x.alternatives.length ? `<div class="sb-alts"><small>Alternatives:</small>${x.alternatives.map(id => `<img src="/media/scene/${id}/thumb" alt="" title="Use scene ${id}" data-alt="${id}" class="${edit ? '' : 'off'}">`).join('')}</div>` : ''}
+          ${state.sbTrim === x.id ? `<div class="sb-trim"><label>Start <input type="number" step="0.1" data-ta value="${x.source_start}" min="${sc?.start}" max="${sc?.end}"></label><label>End <input type="number" step="0.1" data-tb value="${x.source_end}" min="${sc?.start}" max="${sc?.end}"></label><small>Scene: ${sc?.start}–${sc?.end} s</small><button class="btn sm primary" data-trimsave>Save</button><button class="btn sm" data-trimcancel>Cancel</button></div>` : ''}
+          <div class="sb-shot-a">
+            <button class="icon-btn sm" data-shotlock title="${x.locked ? 'Unlock' : 'Lock'}" ${edit ? '' : 'disabled'}>${x.locked ? '🔒' : '🔓'}</button>
+            <button class="btn sm" data-replace ${edit ? '' : 'disabled'}>🔍 Replace</button>
+            <button class="icon-btn sm" data-trim title="Trim" ${edit ? '' : 'disabled'}>✂</button>
+            <button class="icon-btn sm" data-shotleft title="Earlier" ${edit && i && b.shots[i - 1].segment_id === x.segment_id ? '' : 'disabled'}>←</button>
+            <button class="icon-btn sm" data-shotright title="Later" ${edit && i < b.shots.length - 1 && b.shots[i + 1].segment_id === x.segment_id ? '' : 'disabled'}>→</button>
+            <button class="icon-btn sm" data-shotregen title="Pick another scene" ${edit && !x.locked ? '' : 'disabled'}>↻</button>
+            <button class="icon-btn sm" data-shotadd title="Add a shot after" ${edit ? '' : 'disabled'}>＋</button>
+            <button class="icon-btn sm danger" data-shotdel title="Remove" ${edit && !x.locked ? '' : 'disabled'}>🗑</button></div>
+        </div></article>`; }).join('')}</div>` : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>✅ Checks</h2><small>Checked ${val.checked_at ? ago(val.checked_at.replace('T', ' ').slice(0, 19)) : ''}</small></div><button class="btn sm" id="sbRecheck">↻ Check again</button></div>
+      <div class="cp-issues">${val.errors.length ? val.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('') : '<div class="cp-ok">✓ No blocking problem.</div>'}${val.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}</div>`).join('')}</div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🗂 Versions</h2><small>Approved versions never change: editing one starts a new draft.</small></div>
+      <div class="row"><button class="btn sm" id="sbSaveV" ${edit ? '' : 'disabled'}>💾 Save as a version</button><button class="btn sm" id="sbCompare" ${sb.versions.length > 1 ? '' : 'disabled'}>⇄ Compare</button></div></div>
+      <div class="cp-briefs">${sb.versions.map(x => `<div><b>v${x.number}</b><span class="small">${esc(x.label)}</span><span class="pst ${x.approved ? 'st-scaling' : x.frozen ? 'st-paused' : 'st-idea'}">${x.approved ? '✅ Approved' : x.frozen ? 'Saved' : 'Working draft'}</span><span class="muted small">${esc(x.updated_at)}</span>
+        ${x.id !== sb.version.id ? `<button class="btn sm" data-restore="${x.id}" ${edit ? '' : 'disabled'}>Restore</button>` : ''}<button class="btn sm" data-dupv="${x.id}" ${edit ? '' : 'disabled'}>Duplicate</button></div>`).join('')}</div>
+      ${sb.approval ? `<div class="cp-ok">✅ Approved version v${sb.versions.find(x => x.id === sb.approval.version_id)?.number} on ${esc(sb.approval.approved_at)}: the production plan is ready for Module 5. <a id="sbPP">View the production plan</a></div>` : ''}
+    </section>`;
+  // The bottom bar: the final action.
+  const nav = $('.cp-nav');
+  if (nav) nav.innerHTML = `<button class="btn" id="sbBack">← Back</button><span class="muted small">${val.errors.length ? `⛔ ${val.errors.length} blocking · ` : ''}${val.warnings.length ? `⚠ ${val.warnings.length} warnings` : val.errors.length ? '' : '✓ Ready'}</span>
+    <button class="btn primary big" id="sbApprove" ${edit && !val.errors.length && !sb.version.approved ? '' : 'disabled'}>${sb.version.approved ? '✅ Approved' : '✅ Approve Script & Storyboard'}</button>`;
+  sbWire();
+  if (keepScroll) window.scrollTo(0, y);
+  if (busy) sbPoll();
+}
+
+// While generation runs: refresh every 1.5 s (the page stays usable).
+function sbPoll() {
+  clearTimeout(state.sbTimer);
+  const pid = state.sb?.plan.id;
+  state.sbTimer = setTimeout(async () => {
+    if (state.cpStep !== 'script' || state.sb?.plan.id !== pid) return;
+    try { state.sb = await api(`/api/sb-plans/${pid}`); } catch { return; }
+    sbDraw();
+  }, 1500);
+}
+async function sbAct(fn) { try { await fn(); } catch (e) { fail(e); } }
+const sbPatch = body => sbAct(async () => { state.sb = await api(`/api/sb-plans/${state.sb.plan.id}`, { method: 'PATCH', body }); sbDraw(); });
+const sbJob = (kind, target = '', extra = {}) => sbAct(async () => { await api(`/api/sb-plans/${state.sb.plan.id}/jobs`, { method: 'POST', body: { kind, target, ...extra } }); state.sb = await api(`/api/sb-plans/${state.sb.plan.id}`); sbDraw(); });
+
+function sbWire() {
+  const st = state.cp, sb = state.sb, pid = sb?.plan.id;
+  $('#sbVar')?.addEventListener('change', e => { state.sbVar = Number(e.target.value); cpScript(); });
+  const generate = force => sbAct(async () => {
+    const r = await api(`/api/creative-projects/${st.project.id}/sb/generate`, { method: 'POST', body: { variation: state.sbVar, force } });
+    state.sb = await api(`/api/sb-plans/${r.plan_id}`); sbDraw();
+  });
+  $('#sbGen')?.addEventListener('click', () => generate(false));
+  $('#sbGenAll')?.addEventListener('click', () => { if (confirm('Regenerate the strategy, hooks, script and storyboard? Locked segments, hooks and shots are kept.')) generate(true); });
+  $('#sbRetry')?.addEventListener('click', () => (sb.job.kind === 'full' ? generate(true) : sbJob(sb.job.kind, sb.job.target)));
+  $('#sbCancel')?.addEventListener('click', () => sbAct(async () => { await api(`/api/sb-plans/${pid}/cancel`, { method: 'POST' }); toast('Stopping…'); }));
+  $('#sbBack')?.addEventListener('click', () => { location.hash = `project/${st.project.id}/review`; });
+  if (!sb?.script) return;
+  document.querySelectorAll('[data-job]').forEach(b => b.onclick = () => sbJob(b.dataset.job));
+  $('#sbStratBox').ontoggle = e => { state.sbOpenStrategy = e.target.open; };
+  $('#sbStratEdit')?.addEventListener('click', () => { state.sbEditStrategy = true; state.sbOpenStrategy = true; sbDraw(); });
+  $('#sbStratCancel')?.addEventListener('click', () => { state.sbEditStrategy = false; sbDraw(); });
+  $('#sbStratSave')?.addEventListener('click', () => { const s = {}; document.querySelectorAll('[data-strat]').forEach(t => { s[t.dataset.strat] = t.value; }); state.sbEditStrategy = false; sbPatch({ strategy: s }); });
+  $('#sbAuto')?.addEventListener('change', e => sbPatch({ hook_auto: e.target.checked }));
+  document.querySelectorAll('[data-hook]').forEach(card => {
+    const id = card.dataset.hook;
+    $('[data-hooksel]', card)?.addEventListener('click', () => sbPatch({ hook_select: id }));
+    $('[data-hookedit]', card)?.addEventListener('click', () => { state.sbEditHook = id; sbDraw(); });
+    $('[data-hookcancel]', card)?.addEventListener('click', () => { state.sbEditHook = null; sbDraw(); });
+    $('[data-hooksave]', card)?.addEventListener('click', () => { state.sbEditHook = null; sbPatch({ hook_edit: { id, text: $('[data-hooktext]', card).value, on_screen_text: $('[data-hookost]', card).value } }); });
+    $('[data-hookregen]', card)?.addEventListener('click', () => sbJob('hook', id));
+  });
+  $('#sbCopy').onclick = () => navigator.clipboard.writeText(sb.script.segments.map(x => x.text).join('\n\n')).then(() => toast('Script copied'), () => fail(new Error('Copy failed')));
+  $('#sbWhole')?.addEventListener('click', () => { state.sbWhole = true; sbDraw(); });
+  $('#sbWholeCancel')?.addEventListener('click', () => { state.sbWhole = false; sbDraw(); });
+  $('#sbWholeSave')?.addEventListener('click', () => { state.sbWhole = false; sbPatch({ script_text: $('#sbWholeText').value }); });
+  const ids = sb.script.segments.map(x => x.id);
+  document.querySelectorAll('[data-seg]').forEach(row => {
+    const id = row.dataset.seg, seg = sb.script.segments.find(x => x.id === id), i = ids.indexOf(id);
+    $('[data-segtext]', row).onchange = e => sbPatch({ segment: { id, text: e.target.value } });
+    $('[data-segost]', row).onchange = e => sbPatch({ segment: { id, on_screen_text: e.target.value } });
+    $('[data-segrole]', row).onchange = e => sbPatch({ segment: { id, role: e.target.value } });
+    $('[data-seglock]', row).onclick = () => sbPatch({ segment: { id, locked: !seg.locked } });
+    const move = d => { const o = [...ids]; [o[i], o[i + d]] = [o[i + d], o[i]]; sbPatch({ segment_order: o }); };
+    $('[data-segup]', row).onclick = () => move(-1);
+    $('[data-segdown]', row).onclick = () => move(1);
+    $('[data-segregen]', row).onclick = () => { const ins = prompt('Optional instruction for the AI (e.g. "shorter", "mention the gift box"):', ''); if (ins !== null) sbJob('segment', id, { instruction: ins }); };
+    $('[data-segmatch]', row).onclick = () => sbJob('match', id);
+    $('[data-segadd]', row).onclick = () => sbPatch({ add_segment: { after_id: id, role: 'benefit', text: 'New segment.' } });
+    $('[data-segdel]', row).onclick = () => { if (confirm('Remove this segment and its shots?')) sbPatch({ remove_segment: id }); };
+  });
+  document.querySelectorAll('[data-shot]').forEach(card => {
+    const id = card.dataset.shot, shot = sb.storyboard.shots.find(x => x.id === id);
+    $('[data-shotost]', card).onchange = e => sbPatch({ shot: { id, on_screen_text: e.target.value } });
+    card.querySelectorAll('[data-shotf]').forEach(s => s.onchange = () => sbPatch({ shot: { id, [s.dataset.shotf]: s.value } }));
+    $('[data-shotlock]', card).onclick = () => sbPatch({ shot: { id, locked: !shot.locked } });
+    $('[data-replace]', card).onclick = () => sbPicker(sc => sbPatch({ shot: { id, scene_id: sc } }), shot.scene_id);
+    $('[data-trim]', card).onclick = () => { state.sbTrim = id; sbDraw(); };
+    $('[data-trimcancel]', card)?.addEventListener('click', () => { state.sbTrim = null; sbDraw(); });
+    $('[data-trimsave]', card)?.addEventListener('click', () => { state.sbTrim = null; sbPatch({ shot: { id, source_start: Number($('[data-ta]', card).value), source_end: Number($('[data-tb]', card).value) } }); });
+    $('[data-shotleft]', card).onclick = () => sbPatch({ move_shot: { id, dir: -1 } });
+    $('[data-shotright]', card).onclick = () => sbPatch({ move_shot: { id, dir: 1 } });
+    $('[data-shotregen]', card).onclick = () => sbJob('shot', id);
+    $('[data-shotadd]', card).onclick = () => sbPicker(sc => sbPatch({ add_shot: { after_id: id, scene_id: sc } }));
+    $('[data-shotdel]', card).onclick = () => { if (confirm('Remove this shot? The other shots of its segment take its time.')) sbPatch({ remove_shot: id }); };
+    card.querySelectorAll('[data-alt]').forEach(img => img.onclick = () => { if (!img.classList.contains('off')) sbPatch({ shot: { id, scene_id: Number(img.dataset.alt) } }); });
+    sbHover($('.sb-shot-media', card));
+  });
+  $('#sbRecheck').onclick = () => sbAct(async () => { state.sb = await api(`/api/sb-plans/${pid}/validate`, { method: 'POST' }); sbDraw(); toast('Checked'); });
+  $('#sbSaveV')?.addEventListener('click', () => { const l = prompt('Name of this version (optional):', ''); if (l !== null) sbAct(async () => { state.sb = await api(`/api/sb-plans/${pid}/versions`, { method: 'POST', body: { label: l } }); sbDraw(); toast('Version saved'); }); });
+  document.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { if (confirm('Restore this version as the new working draft? The current draft stays in the history.')) sbAct(async () => { state.sb = await api(`/api/sb-plans/${pid}/versions/${b.dataset.restore}/restore`, { method: 'POST' }); sbDraw(); toast('Restored'); }); });
+  document.querySelectorAll('[data-dupv]').forEach(b => b.onclick = () => sbAct(async () => { state.sb = await api(`/api/sb-plans/${pid}/versions/${b.dataset.dupv}/duplicate`, { method: 'POST' }); sbDraw(); toast('Duplicated as a new draft'); }));
+  $('#sbCompare')?.addEventListener('click', sbCompare);
+  $('#sbApprove')?.addEventListener('click', () => sbAct(async () => {
+    const r = await fetch(`/api/sb-plans/${pid}/approve`, { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) { state.sb = await api(`/api/sb-plans/${pid}`); sbDraw(); throw new Error(j.error || 'Could not approve'); }
+    state.sb = j; sbDraw(); toast('Approved: the production plan is ready for Module 5'); refreshSide();
+  }));
+  $('#sbPP')?.addEventListener('click', () => sbJson('Production plan (for Modules 5-8)', sb.approval.production_plan));
+}
+// Hovering a shot plays its seconds from the silent copy.
+function sbHover(box) {
+  if (!box) return;
+  let v = null;
+  box.onmouseenter = () => {
+    const a = Number(box.dataset.a), b = Number(box.dataset.b);
+    v = document.createElement('video'); v.muted = true; v.playsInline = true; v.className = 'fs-hover';
+    v.src = `/media/footage/${box.dataset.asset}/preview#t=${a},${b}`;
+    v.onloadedmetadata = () => { v.currentTime = a; v.play().catch(() => {}); };
+    v.ontimeupdate = () => { if (v.currentTime >= b) v.currentTime = a; };
+    box.appendChild(v);
+  };
+  box.onmouseleave = () => { if (v) { v.pause(); v.remove(); v = null; } };
+}
+// Pick a scene among the brief's usable scenes.
+function sbPicker(onPick, current = null) {
+  const scenes = state.sb.scenes, cats = state.footCfg?.categories || {};
+  const m = document.createElement('div');
+  m.className = 'modal';
+  const draw = (q = '', cat = '') => {
+    const list = scenes.filter(s => (!cat || s.categories.includes(cat)) && (!q || `${s.description} ${s.semantic}`.toLowerCase().includes(q.toLowerCase())));
+    m.innerHTML = `<div class="modal-card" style="width:min(980px,100%)"><div class="sec-h"><div><h2>🔍 Choose a scene</h2><small>Only scenes allowed by the brief (silent, analysed, not excluded).</small></div><button class="btn sm" data-x>Close</button></div>
+      <div class="fs-filters" style="position:static"><input type="search" id="pkQ" placeholder="Search descriptions…" value="${esc(q)}"><select id="pkC"><option value="">All categories</option>${Object.entries(cats).map(([k, l]) => `<option value="${k}" ${cat === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="fs-grid">${list.map(s => `<article class="fs-card ${s.id === current ? 'cp-on' : ''}" data-pick="${s.id}"><div class="fs-media ${s.orientation || ''}"><img src="/media/scene/${s.id}/thumb" alt="" loading="lazy"><span class="fs-q ${qClass(s.quality)}">${s.quality ?? '–'}</span><span class="fv-dur">${s.duration.toFixed(1)}s</span></div>
+        <div class="fs-body"><div class="fs-time">Scene ${s.id} · ${fmtT(s.start)}–${fmtT(s.end)}</div><p class="fs-desc">${esc(s.description || s.semantic)}</p><div class="fs-cats">${s.categories.slice(0, 3).map(c => `<span>${esc(cats[c] || c)}</span>`).join('')}</div></div></article>`).join('') || '<p class="muted">No scene matches.</p>'}</div></div>`;
+    m.querySelector('[data-x]').onclick = () => m.remove();
+    $('#pkQ', m).onchange = e => draw(e.target.value, cat);
+    $('#pkC', m).onchange = e => draw(q, e.target.value);
+    m.querySelectorAll('[data-pick]').forEach(c => c.onclick = () => { m.remove(); onPick(Number(c.dataset.pick)); });
+  };
+  m.onclick = e => { if (e.target === m) m.remove(); };
+  document.body.appendChild(m);
+  draw();
+}
+async function sbCompare() {
+  const vs = state.sb.versions;
+  const a = prompt(`Compare which versions? Older first, e.g. "${vs[vs.length - 1].number} ${vs[0].number}"`, `${vs[Math.min(1, vs.length - 1)].number} ${vs[0].number}`);
+  if (!a) return;
+  const [x, y] = a.split(/[\s,]+/).map(Number);
+  const A = vs.find(v => v.number === x), B = vs.find(v => v.number === y);
+  if (!A || !B) return fail(new Error('Unknown version number'));
+  try {
+    const d = await api(`/api/sb-plans/${state.sb.plan.id}/compare?a=${A.id}&b=${B.id}`);
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<div class="modal-card" style="width:min(900px,100%)"><div class="sec-h"><div><h2>⇄ v${d.a} → v${d.b}</h2><small>Estimated ${d.seconds[0]} s → ${d.seconds[1]} s</small></div><button class="btn sm" data-x>Close</button></div>
+      ${d.hook ? `<h4>Hook</h4><p class="sb-del">${esc(d.hook.before || '—')}</p><p class="sb-add">${esc(d.hook.after || '—')}</p>` : ''}
+      ${d.strategy.length ? `<h4>Strategy</h4>${d.strategy.map(c => `<p><b>${esc(c.field)}</b></p><p class="sb-del">${esc(JSON.stringify(c.before))}</p><p class="sb-add">${esc(JSON.stringify(c.after))}</p>`).join('')}` : ''}
+      <h4>Script</h4>${d.script.length ? d.script.map(c => `<p><b>${esc(c.id)}</b> ${c.change}</p>${c.before ? `<p class="sb-del">${esc(c.before)}</p>` : ''}${c.after ? `<p class="sb-add">${esc(c.after)}</p>` : ''}`).join('') : '<p class="muted">No change.</p>'}
+      <h4>Storyboard</h4>${d.storyboard.length ? `<ul>${d.storyboard.map(c => `<li><b>${esc(c.id)}</b> ${c.change}${c.scene_before ? ` · scene ${c.scene_before}` : ''}${c.scene_after ? ` → ${c.scene_after}` : ''}${c.trim_after ? ` · trim ${c.trim_before?.join('–')} → ${c.trim_after.join('–')}` : ''}</li>`).join('')}</ul>` : '<p class="muted">No change.</p>'}</div>`;
+    m.onclick = e => { if (e.target === m || e.target.dataset.x !== undefined) m.remove(); };
+    document.body.appendChild(m);
+  } catch (e) { fail(e); }
+}
+function sbJson(title, obj) {
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<div class="modal-card" style="width:min(900px,100%)"><div class="sec-h"><div><h2>${esc(title)}</h2></div><button class="btn sm" data-x>Close</button></div><pre class="cp-json">${esc(JSON.stringify(obj, null, 2))}</pre></div>`;
+  m.onclick = e => { if (e.target === m || e.target.dataset.x !== undefined) m.remove(); };
+  document.body.appendChild(m);
 }
 
 // ---------- Team ----------

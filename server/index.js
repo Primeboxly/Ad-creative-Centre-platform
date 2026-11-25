@@ -13,6 +13,8 @@ import { setMarkets, strategyState, startAnalysis, startAngles, startOneAngle, a
 import { MARKETS } from './markets.js';
 import { mountFootage } from './footage-routes.js';
 import { mountCreative } from './creative-routes.js';
+import { mountScripts } from './sb-routes.js';
+import { startSbWorker } from './sb-jobs.js';
 import { startFootageWorker, deleteProductFootage } from './footage.js';
 import { resetFromEnv } from './maintenance/reset-data.js';
 
@@ -406,6 +408,9 @@ mountFootage(app, { h, idParam, str, productOr404 });
 // ---------- Creative projects & Creative Brief (Module 3) ----------
 mountCreative(app, { h, idParam });
 
+// ---------- AI script & storyboard (Module 4) ----------
+mountScripts(app, { idParam });
+
 // ---------- Errors ----------
 app.use((err, req, res, next) => {
   res.set('Cache-Control', 'no-store'); // never let a browser keep an error
@@ -425,4 +430,5 @@ if (noUsers() && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
 // One-time data reset when the ACC_RESET_DATA variable asks for it (see server/maintenance/reset-data.js).
 await resetFromEnv().catch(e => console.error('[reset] FAILED, nothing more was changed after the error:', e));
 startFootageWorker();
+startSbWorker();
 app.listen(PORT, () => console.log(`Ad creative Centre on http://localhost:${PORT}`));

@@ -1,0 +1,443 @@
+{
+  "schema_version": "1.0",
+  "plan_id": 3,
+  "project_id": 1,
+  "product_id": 1,
+  "brief": {
+    "id": 1,
+    "version": 1
+  },
+  "version": {
+    "id": 17,
+    "number": 1,
+    "strategy_rev": 1
+  },
+  "variation": {
+    "index": 3,
+    "angle_ids": [
+      1,
+      2
+    ],
+    "creative_type": "direct_response",
+    "hook_style": "question",
+    "footage_set": 1,
+    "script": "same script base",
+    "editing_style": "dynamic"
+  },
+  "product": {
+    "name": "Crystal Watch"
+  },
+  "creative_type": {
+    "id": "direct_response",
+    "name": "Direct Response"
+  },
+  "angles": [
+    {
+      "id": 1,
+      "name": "Perfect gift"
+    },
+    {
+      "id": 2,
+      "name": "Everyday elegance"
+    }
+  ],
+  "target": {
+    "country": "ZM",
+    "language": "en",
+    "language_name": "English",
+    "dialect": "",
+    "currency": "ZMW",
+    "price": "780",
+    "offer": "",
+    "confirmed": {
+      "cash_on_delivery": true,
+      "free_delivery": false,
+      "limited_stock": false,
+      "guarantee": false
+    }
+  },
+  "platform": {
+    "id": "fb_ig",
+    "name": "Facebook and Instagram Ads"
+  },
+  "format": {
+    "duration_seconds": 20,
+    "aspect_ratio": "9:16",
+    "resolution": "1080p",
+    "width": 1080,
+    "height": 1920
+  },
+  "tone": "persuasive",
+  "editing_pace": "dynamic",
+  "cta": "Order Now",
+  "timing": {
+    "provisional": true,
+    "authority": "Module 5 voice-over durations replace these estimates",
+    "script_seconds": 21.97,
+    "target_seconds": 20
+  },
+  "strategy": {
+    "main_message": "Perfect gift with Crystal Watch",
+    "primary_pain_point": "Hard to find the right gift",
+    "main_benefit": "Looks elegant every day",
+    "awareness_level": "problem_aware",
+    "emotional_approach": "Love",
+    "hook_strategy": "Open on the product close-up with a question.",
+    "narrative": [
+      {
+        "role": "hook",
+        "purpose": "Bold, direct opening."
+      },
+      {
+        "role": "problem",
+        "purpose": "The need in one line."
+      },
+      {
+        "role": "benefit",
+        "purpose": "Fast list of benefits."
+      },
+      {
+        "role": "offer",
+        "purpose": "Price or real promotion (only if provided)."
+      },
+      {
+        "role": "cta",
+        "purpose": "Urgent, clear call to action."
+      }
+    ],
+    "selling_approach": "Show, then tell the benefit, then the price.",
+    "visual_approach": "Close product shots, hands using it.",
+    "cta_strategy": "End with \"Order Now\".",
+    "missing_visuals": [
+      {
+        "need": "Product being worn outdoors",
+        "alternative": "Use the close-up shots instead."
+      }
+    ],
+    "claims_to_avoid": [
+      "No invented reviews"
+    ],
+    "source": "ai",
+    "rev": 1
+  },
+  "hook": {
+    "id": "h1",
+    "style": "question",
+    "text": "Still looking for the perfect gift?",
+    "on_screen_text": "Perfect gift?"
+  },
+  "voiceover": {
+    "enabled": true,
+    "language": "en",
+    "dialect": "",
+    "tone": "persuasive",
+    "segments": [
+      {
+        "id": "s1",
+        "order": 1,
+        "role": "hook",
+        "text": "Still looking for the perfect gift?",
+        "est_start": 0,
+        "est_end": 2.86,
+        "emotion": "warm"
+      },
+      {
+        "id": "s2",
+        "order": 2,
+        "role": "problem",
+        "text": "Plain watches look the same on everyone.",
+        "est_start": 2.86,
+        "est_end": 6.1,
+        "emotion": "warm"
+      },
+      {
+        "id": "s3",
+        "order": 3,
+        "role": "benefit",
+        "text": "You look elegant at work, at church or at a wedding.",
+        "est_start": 6.1,
+        "est_end": 11.03,
+        "emotion": "warm"
+      },
+      {
+        "id": "s4",
+        "order": 4,
+        "role": "offer",
+        "text": "Only 780 ZMW.",
+        "est_start": 11.03,
+        "est_end": 12.73,
+        "emotion": "warm"
+      },
+      {
+        "id": "s5",
+        "order": 5,
+        "role": "benefit",
+        "text": "You look elegant at work, at church or at a wedding.",
+        "est_start": 12.73,
+        "est_end": 17.66,
+        "emotion": "warm"
+      },
+      {
+        "id": "s6",
+        "order": 6,
+        "role": "feature",
+        "text": "A gold finish and a matching bracelet.",
+        "est_start": 17.66,
+        "est_end": 20.9,
+        "emotion": "warm"
+      },
+      {
+        "id": "s7",
+        "order": 7,
+        "role": "cta",
+        "text": "Order Now.",
+        "est_start": 20.9,
+        "est_end": 21.97,
+        "emotion": "warm"
+      }
+    ]
+  },
+  "music": {
+    "enabled": true,
+    "mood": "Love",
+    "pace": "dynamic"
+  },
+  "captions": {
+    "enabled": true,
+    "language": "en",
+    "source": "voiceover segments"
+  },
+  "text_overlays": [
+    {
+      "shot_id": "k1",
+      "segment_id": "s1",
+      "text": "Perfect gift?",
+      "start": 0,
+      "end": 2.86,
+      "emphasis": false
+    },
+    {
+      "shot_id": "k11",
+      "segment_id": "s7",
+      "text": "Order Now",
+      "start": 20.9,
+      "end": 21.97,
+      "emphasis": true
+    }
+  ],
+  "shots": [
+    {
+      "id": "k1",
+      "order": 1,
+      "segment_id": "s1",
+      "scene_id": 1,
+      "asset_id": 1,
+      "source_key": "",
+      "source_start": 0.07,
+      "source_end": 2.93,
+      "timeline_start": 0,
+      "timeline_end": 2.86,
+      "duration": 2.86,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k2",
+      "order": 2,
+      "segment_id": "s2",
+      "scene_id": 4,
+      "asset_id": 1,
+      "source_key": "",
+      "source_start": 9.69,
+      "source_end": 11.31,
+      "timeline_start": 2.86,
+      "timeline_end": 4.48,
+      "duration": 1.62,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k3",
+      "order": 3,
+      "segment_id": "s2",
+      "scene_id": 2,
+      "asset_id": 1,
+      "source_key": "",
+      "source_start": 3.69,
+      "source_end": 5.31,
+      "timeline_start": 4.48,
+      "timeline_end": 6.1,
+      "duration": 1.62,
+      "crop": "center",
+      "motion": "none",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k4",
+      "order": 4,
+      "segment_id": "s3",
+      "scene_id": 6,
+      "asset_id": 2,
+      "source_key": "",
+      "source_start": 4.77,
+      "source_end": 7.24,
+      "timeline_start": 6.1,
+      "timeline_end": 8.57,
+      "duration": 2.47,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k5",
+      "order": 5,
+      "segment_id": "s3",
+      "scene_id": 7,
+      "asset_id": 3,
+      "source_key": "",
+      "source_start": 1.27,
+      "source_end": 3.74,
+      "timeline_start": 8.57,
+      "timeline_end": 11.03,
+      "duration": 2.47,
+      "crop": "center",
+      "motion": "none",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k6",
+      "order": 6,
+      "segment_id": "s4",
+      "scene_id": 6,
+      "asset_id": 2,
+      "source_key": "",
+      "source_start": 5.15,
+      "source_end": 6.85,
+      "timeline_start": 11.03,
+      "timeline_end": 12.73,
+      "duration": 1.7,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k7",
+      "order": 7,
+      "segment_id": "s5",
+      "scene_id": 7,
+      "asset_id": 3,
+      "source_key": "",
+      "source_start": 1.27,
+      "source_end": 3.74,
+      "timeline_start": 12.73,
+      "timeline_end": 15.2,
+      "duration": 2.47,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k8",
+      "order": 8,
+      "segment_id": "s5",
+      "scene_id": 3,
+      "asset_id": 1,
+      "source_key": "",
+      "source_start": 6.27,
+      "source_end": 8.74,
+      "timeline_start": 15.2,
+      "timeline_end": 17.66,
+      "duration": 2.47,
+      "crop": "center",
+      "motion": "none",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k9",
+      "order": 9,
+      "segment_id": "s6",
+      "scene_id": 3,
+      "asset_id": 1,
+      "source_key": "",
+      "source_start": 6.69,
+      "source_end": 8.31,
+      "timeline_start": 17.66,
+      "timeline_end": 19.28,
+      "duration": 1.62,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k10",
+      "order": 10,
+      "segment_id": "s6",
+      "scene_id": 5,
+      "asset_id": 2,
+      "source_key": "",
+      "source_start": 1.19,
+      "source_end": 2.81,
+      "timeline_start": 19.28,
+      "timeline_end": 20.9,
+      "duration": 1.62,
+      "crop": "center",
+      "motion": "none",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    },
+    {
+      "id": "k11",
+      "order": 11,
+      "segment_id": "s7",
+      "scene_id": 5,
+      "asset_id": 2,
+      "source_key": "",
+      "source_start": 1.47,
+      "source_end": 2.54,
+      "timeline_start": 20.9,
+      "timeline_end": 21.97,
+      "duration": 1.07,
+      "crop": "center",
+      "motion": "subtle_zoom_in",
+      "transition": "smooth_cut",
+      "speed": 1,
+      "edit_notes": ""
+    }
+  ],
+  "production": {
+    "voiceover": true,
+    "music": true,
+    "captions": true,
+    "text_overlays": true,
+    "sound_effects": false,
+    "price_display": false,
+    "cta_screen": true,
+    "original_audio": "excluded"
+  },
+  "footage_audio": "excluded (silent copies only)",
+  "sound_effects": false,
+  "cta_screen": true,
+  "price_display": false,
+  "approved_at": "2026-11-25T20:16:01.983Z"
+}

@@ -1,0 +1,307 @@
+{
+  "strategy": {
+    "main_message": "Perfect gift with Crystal Watch",
+    "primary_pain_point": "Hard to find the right gift",
+    "main_benefit": "Looks elegant every day",
+    "awareness_level": "problem_aware",
+    "emotional_approach": "Love",
+    "hook_strategy": "Open on the product close-up with a question.",
+    "narrative": [
+      {
+        "role": "hook",
+        "purpose": "Bold, direct opening."
+      },
+      {
+        "role": "problem",
+        "purpose": "The need in one line."
+      },
+      {
+        "role": "benefit",
+        "purpose": "Fast list of benefits."
+      },
+      {
+        "role": "offer",
+        "purpose": "Price or real promotion (only if provided)."
+      },
+      {
+        "role": "cta",
+        "purpose": "Urgent, clear call to action."
+      }
+    ],
+    "selling_approach": "Show, then tell the benefit, then the price.",
+    "visual_approach": "Close product shots, hands using it.",
+    "cta_strategy": "End with \"Order Now\".",
+    "missing_visuals": [
+      {
+        "need": "Product being worn outdoors",
+        "alternative": "Use the close-up shots instead."
+      }
+    ],
+    "claims_to_avoid": [
+      "No invented reviews"
+    ],
+    "source": "ai",
+    "rev": 1
+  },
+  "hooks": {
+    "items": [
+      {
+        "id": "h1",
+        "style": "question",
+        "text": "Still looking for the perfect gift?",
+        "visual_opening": "Close-up of the product turning in the light",
+        "on_screen_text": "Perfect gift?",
+        "scene_ids": [
+          1
+        ],
+        "est_seconds": 2.5,
+        "angle_relevance": 90,
+        "explanation": "question opening that matches the angle.",
+        "source": "ai",
+        "locked": false
+      },
+      {
+        "id": "h2",
+        "style": "problem",
+        "text": "Tired of plain watches?",
+        "visual_opening": "Close-up of the product turning in the light",
+        "on_screen_text": "",
+        "scene_ids": [
+          2
+        ],
+        "est_seconds": 2.5,
+        "angle_relevance": 82,
+        "explanation": "problem opening that matches the angle.",
+        "source": "ai",
+        "locked": false
+      },
+      {
+        "id": "h3",
+        "style": "curiosity",
+        "text": "Look closely at this Crystal Watch.",
+        "visual_opening": "Close-up of the product turning in the light",
+        "on_screen_text": "",
+        "scene_ids": [
+          3
+        ],
+        "est_seconds": 2.5,
+        "angle_relevance": 74,
+        "explanation": "curiosity opening that matches the angle.",
+        "source": "ai",
+        "locked": false
+      },
+      {
+        "id": "h4",
+        "style": "benefit",
+        "text": "One watch, every outfit.",
+        "visual_opening": "Close-up of the product turning in the light",
+        "on_screen_text": "",
+        "scene_ids": [
+          4
+        ],
+        "est_seconds": 2.5,
+        "angle_relevance": 66,
+        "explanation": "benefit opening that matches the angle.",
+        "source": "ai",
+        "locked": false
+      },
+      {
+        "id": "h5",
+        "style": "demonstration",
+        "text": "780 ZMW only.",
+        "visual_opening": "Close-up of the product turning in the light",
+        "on_screen_text": "",
+        "scene_ids": [
+          5
+        ],
+        "est_seconds": 2.5,
+        "angle_relevance": 58,
+        "explanation": "demonstration opening that matches the angle.",
+        "source": "ai",
+        "locked": false
+      }
+    ],
+    "selected": "h1",
+    "auto": true
+  },
+  "script": {
+    "schema_version": "1.0",
+    "language": "en",
+    "dialect": "",
+    "tone": "persuasive",
+    "target_seconds": 20,
+    "est_seconds": 21.97,
+    "diff_seconds": 1.97,
+    "words": 47,
+    "structure": [
+      "Strong Hook",
+      "Pain Point or Need",
+      "Benefits",
+      "Offer",
+      "CTA"
+    ],
+    "hook_id": "h1",
+    "segments": [
+      {
+        "id": "s1",
+        "order": 1,
+        "role": "hook",
+        "text": "Still looking for the perfect gift?",
+        "on_screen_text": "Perfect gift?",
+        "visual_intent": "Show: Still looking for the perfect gift?",
+        "scene_categories": [
+          "hook",
+          "closeup"
+        ],
+        "features": [],
+        "benefits": [],
+        "emotion": "warm",
+        "transition": "hard_cut",
+        "est_start": 0,
+        "est_end": 2.86,
+        "est_duration": 2.86,
+        "words": 6,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s2",
+        "order": 2,
+        "role": "problem",
+        "text": "Plain watches look the same on everyone.",
+        "on_screen_text": "",
+        "visual_intent": "Show: Plain watches look the same on everyone.",
+        "scene_categories": [
+          "problem",
+          "lifestyle"
+        ],
+        "features": [],
+        "benefits": [],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 2.86,
+        "est_end": 6.1,
+        "est_duration": 3.24,
+        "words": 7,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s3",
+        "order": 3,
+        "role": "benefit",
+        "text": "You look elegant at work, at church or at a wedding.",
+        "on_screen_text": "",
+        "visual_intent": "Show: You look elegant at work, at church or at a wedding.",
+        "scene_categories": [
+          "features",
+          "solution"
+        ],
+        "features": [],
+        "benefits": [
+          "looks elegant"
+        ],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 6.1,
+        "est_end": 11.03,
+        "est_duration": 4.93,
+        "words": 11,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s4",
+        "order": 4,
+        "role": "offer",
+        "text": "Only 780 ZMW.",
+        "on_screen_text": "",
+        "visual_intent": "Show: Only 780 ZMW.",
+        "scene_categories": [
+          "offer",
+          "showcase"
+        ],
+        "features": [],
+        "benefits": [],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 11.03,
+        "est_end": 12.73,
+        "est_duration": 1.7,
+        "words": 3,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s5",
+        "order": 5,
+        "role": "benefit",
+        "text": "You look elegant at work, at church or at a wedding.",
+        "on_screen_text": "",
+        "visual_intent": "Show: You look elegant at work, at church or at a wedding.",
+        "scene_categories": [
+          "features",
+          "solution"
+        ],
+        "features": [],
+        "benefits": [
+          "looks elegant"
+        ],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 12.73,
+        "est_end": 17.66,
+        "est_duration": 4.93,
+        "words": 11,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s6",
+        "order": 6,
+        "role": "feature",
+        "text": "A gold finish and a matching bracelet.",
+        "on_screen_text": "",
+        "visual_intent": "Show: A gold finish and a matching bracelet.",
+        "scene_categories": [
+          "features",
+          "closeup"
+        ],
+        "features": [
+          "gold finish"
+        ],
+        "benefits": [],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 17.66,
+        "est_end": 20.9,
+        "est_duration": 3.24,
+        "words": 7,
+        "locked": false,
+        "source": "ai"
+      },
+      {
+        "id": "s7",
+        "order": 7,
+        "role": "cta",
+        "text": "Order Now.",
+        "on_screen_text": "Order Now",
+        "visual_intent": "Show: Order Now.",
+        "scene_categories": [
+          "cta",
+          "showcase"
+        ],
+        "features": [],
+        "benefits": [],
+        "emotion": "warm",
+        "transition": "smooth_cut",
+        "est_start": 20.9,
+        "est_end": 21.97,
+        "est_duration": 1.07,
+        "words": 2,
+        "locked": false,
+        "source": "ai"
+      }
+    ]
+  }
+}
