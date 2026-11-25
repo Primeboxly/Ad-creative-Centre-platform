@@ -144,7 +144,7 @@ Required: **`ELEVENLABS_API_KEY`** (already there). All others are optional:
 ## Manual steps (simple)
 
 1. ElevenLabs → **Developers → API keys**: the key in `ELEVENLABS_API_KEY` needs these permissions:
-   **Text to Speech**, **Voices (read)**, **Music Generation**, **User (read)** (for credits), and **Pronunciation
+   **Text to Speech**, **Voices (read)**, **Models (read)**, **Music Generation**, **User (read)** (for credits), and **Pronunciation
    Dictionaries (write)** only if you add phoneme rules. If a permission is missing, the page says which one.
 2. Add the voices you want to use to your ElevenLabs account (Voice Library → "Add to my voices"), then click
    **↻ Refresh from ElevenLabs** in the voice picker. Only voices on the account can be used.

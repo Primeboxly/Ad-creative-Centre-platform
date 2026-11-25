@@ -22,7 +22,7 @@ function explain(status, body) {
   const d = body?.detail;
   const msg = typeof d === 'string' ? d : d?.message || body?.message || '';
   const code = (typeof d === 'object' && d?.status) || '';
-  if (status === 401 && /permission|missing_permissions/i.test(`${code} ${msg}`)) return { m: `The ElevenLabs key lacks a permission: ${msg || code}. In ElevenLabs → Developers → API keys, edit the key and allow it.`, code: 'missing_permissions' };
+  if (status === 401 && /permission|missing_permissions/i.test(`${code} ${msg}`)) return { m: `The ElevenLabs key lacks a permission: ${String(msg || code).replace(/\.+$/, '')}. In ElevenLabs → Developers → API keys, edit the key and allow it.`, code: 'missing_permissions' };
   if (status === 401) return { m: 'The ElevenLabs key is wrong or expired (ELEVENLABS_API_KEY).', code: 'invalid_key' };
   if (status === 402 || /quota|credits|insufficient/i.test(`${code} ${msg}`)) return { m: `Not enough ElevenLabs credits for this request${msg ? `: ${msg}` : ''}.`, code: 'quota' };
   if (status === 403) return { m: `Not available on this ElevenLabs account or plan${msg ? `: ${msg}` : ''}.`, code: 'not_allowed' };
