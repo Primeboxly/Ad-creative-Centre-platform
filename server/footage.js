@@ -348,7 +348,8 @@ function saveAnalysis(s, r, { key, aHash, model }) {
   const scene = db.prepare(`SELECT * FROM footage_scenes WHERE id = ?`).get(s.id);
   const flags = [];
   if (r.watermark?.present) flags.push('watermark');
-  if (r.text_overlays?.length) flags.push('text_overlay');
+  if (r.text_overlays?.length || r.graphics?.captions || r.graphics?.promo_text) flags.push('text_overlay');
+  if (r.graphics?.arrows_stickers || r.graphics?.other_graphics) flags.push('graphics');
   if (r.origin === 'staged_or_promotional' || r.origin === 'synthetic_or_cgi') flags.push('staged');
   if (r.relevance < 30) flags.push('irrelevant');
   const ai = Math.round(r.quality?.score ?? 0);
@@ -363,7 +364,7 @@ function saveAnalysis(s, r, { key, aHash, model }) {
   const data = {
     objects: r.objects, product_visible: r.product_visible, features_shown: r.features_shown, benefits_supported: r.benefits_supported,
     human_interaction: r.human_interaction, environment: r.environment, camera_movement: r.camera_movement, composition: r.composition,
-    text_overlays: r.text_overlays, watermark: r.watermark, origin: r.origin, relevance_note: r.relevance_note, quality_parts: r.quality,
+    text_overlays: r.text_overlays, watermark: r.watermark, graphics: r.graphics, product_box: r.product_box, origin: r.origin, relevance_note: r.relevance_note, quality_parts: r.quality,
   };
   const prev = db.prepare(`SELECT edited, placements FROM scene_analyses WHERE scene_id = ?`).get(s.id);
   const validAngles = new Set(db.prepare(`SELECT id FROM angles WHERE product_id = ?`).all(scene.product_id).map(x => x.id));

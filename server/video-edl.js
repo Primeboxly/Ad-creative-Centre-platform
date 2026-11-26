@@ -4,45 +4,125 @@
 import { createHash } from 'node:crypto';
 import { EDL_VERSION, FORMATS, DEFAULT_FPS, PACE, LIMITS, SPEED_RANGE, TRANSITIONS, FRAMINGS, MOTIONS, EDL_SCHEMA } from './video-schemas.js';
 import { validate as checkSchema } from './schema.js';
+import { selectScenes, extrasFor, cleanliness } from './video-select.js';
 
 const r3 = x => Math.round(x * 1000) / 1000;
 export const edlHash = edl => createHash('sha256').update(JSON.stringify({ t: edl.timeline, v: edl.tracks.video.map(({ reason, locked, source, ...c }) => c), a: edl.audio, k: [edl.tracks.voiceover?.key, edl.tracks.music?.key, edl.tracks.mix?.key] })).digest('hex');
 const SAFE = { '9:16': { top: 0.1, bottom: 0.2, left: 0.06, right: 0.12 }, '4:5': { top: 0.06, bottom: 0.12, left: 0.05, right: 0.05 }, '1:1': { top: 0.05, bottom: 0.1, left: 0.05, right: 0.05 }, '16:9': { top: 0.05, bottom: 0.1, left: 0.05, right: 0.05 } };
 
-// Where to crop: the director's focus when the composition gives a hint, else the centre (and the crop is flagged uncertain
-// when the source shape differs a lot from the output: something important could be cut).
-function cropFor(scene, decision, outAspect) {
+// Framing. With a product position from Module 2 (product_box): the crop window is placed so the whole product (and the
+// hand using it) stays inside; if it cannot fit, the whole frame is kept on a blurred background. Without a position,
+// conservative: a big shape change with people or a wide action keeps the whole frame, otherwise a centre crop flagged
+// for review. The team's manual framing always wins (applied later in the editor).
+export function cropFor(scene, decision, outAspect) {
   const [ow, oh] = FORMATS[outAspect] || FORMATS['9:16'];
   const sa = scene?.width && scene?.height ? scene.width / scene.height : ow / oh, oa = ow / oh;
   const mismatch = Math.max(sa, oa) / Math.min(sa, oa);
-  const mode = FRAMINGS.includes(decision?.framing) ? decision.framing : mismatch > 1.25 ? 'smart_crop' : 'center_crop';
-  const hinted = /left|right|top|bottom|corner|off-cent|side/i.test(scene?.details?.composition || '');
-  const x = mode === 'center_crop' ? 0.5 : Number.isFinite(decision?.focus_x) ? decision.focus_x : 0.5;
-  const y = mode === 'center_crop' ? 0.5 : Number.isFinite(decision?.focus_y) ? decision.focus_y : 0.5;
-  return { mode, x: r3(x), y: r3(y), zoom: mode === 'product_focus' ? 1.15 : 1, uncertain: mode !== 'fit_background' && mismatch > 1.5 && !hinted && mode !== 'manual' };
+  const d = scene?.details || {}, box = d.product_box?.present && d.product_box.w > 0 && d.product_box.h > 0 ? d.product_box : null;
+  const cw = sa > oa ? oa / sa : 1, ch = sa > oa ? 1 : sa / oa; // crop window size, as fractions of the source frame
+  const place = (c, size, len) => (size >= 1 ? 0.5 : Math.max(0, Math.min(1, (c - size / 2) / (1 - size))));
+  if (box) {
+    const bw = Math.min(1, box.w * 1.08), bh = Math.min(1, box.h * 1.08), cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    if (bw <= cw + 0.001 && bh <= ch + 0.001) {
+      // A small product can be shown closer (product focus), never cutting it.
+      const room = Math.min(cw / bw, ch / bh);
+      const wantFocus = decision?.framing === 'product_focus' || (room > 2.2 && mismatch > 1.2);
+      const zoom = wantFocus ? r3(Math.min(1.35, Math.max(1, room * 0.75))) : 1;
+      return { mode: wantFocus ? 'product_focus' : 'smart_crop', x: r3(place(cx, cw / zoom)), y: r3(place(cy, ch / zoom)), zoom, uncertain: false, basis: 'product position' };
+    }
+    return { mode: 'fit_background', x: 0.5, y: 0.5, zoom: 1, uncertain: false, basis: 'product wider than the crop: whole frame kept' };
+  }
+  const wide = /wide|full|left|right|both|group|people|person/i.test(`${d.composition || ''} ${d.human_interaction ? 'person' : ''}`);
+  if (mismatch > 1.5 && wide && decision?.framing !== 'center_crop') return { mode: 'fit_background', x: 0.5, y: 0.5, zoom: 1, uncertain: false, basis: 'no product position: whole frame kept (conservative)' };
+  const mode = ['center_crop', 'smart_crop', 'fit_background'].includes(decision?.framing) ? decision.framing : mismatch > 1.25 ? 'smart_crop' : 'center_crop';
+  const hinted = /left|right|top|bottom|corner|off-cent|side/i.test(d.composition || '');
+  const x = mode === 'center_crop' ? 0.5 : Number.isFinite(decision?.focus_x) && hinted ? decision.focus_x : 0.5;
+  const y = mode === 'center_crop' ? 0.5 : Number.isFinite(decision?.focus_y) && hinted ? decision.focus_y : 0.5;
+  return { mode, x: r3(x), y: r3(y), zoom: 1, uncertain: mode !== 'fit_background' && mismatch > 1.5, basis: hinted ? 'composition notes' : 'centre (no product position)' };
 }
 
-// Split one storyboard shot into several clips when it is long for the pace: extra relevant scenes first, then other
-// non-overlapping parts of the same scene. Returns [{ scene, from, len }] (source seconds) covering `seconds` of timeline.
-function plan(shot, seconds, scene, extras, pace, uses, firstOffset = 0) {
+// Cut times inside a window, placed between spoken words near the ideal rhythm (cuts land on the voice, not mid-word).
+function cutTimes(start, end, n, words, minLen) {
+  if (n <= 1) return [];
+  const gaps = words.filter((w, i) => i < words.length - 1 && w.end > start + minLen && w.end < end - minLen).map((w, i, arr) => (w.end + (words[words.indexOf(w) + 1]?.start ?? w.end)) / 2);
+  const cuts = [];
+  for (let k = 1; k < n; k++) {
+    const ideal = start + ((end - start) * k) / n;
+    const prev = cuts.at(-1) ?? start;
+    const near = gaps.filter(g => g > prev + minLen && g < end - minLen * (n - k) && Math.abs(g - ideal) <= Math.min(0.6, (end - start) / n / 2)).sort((a, b) => Math.abs(a - ideal) - Math.abs(b - ideal))[0];
+    cuts.push(near ?? ideal);
+  }
+  return cuts;
+}
+
+// Pieces of one shot: [{ scene, from, len }] using non-overlapping source intervals (global tracker `taken`).
+function plan({ seconds, primary, extras, pace, role, firstOffset, shotStart, taken, closing }) {
   const p = PACE[pace] || PACE.dynamic;
-  const want = seconds > p.max ? Math.max(2, Math.round(seconds / p.ideal)) : 1;
-  const sources = [scene, ...extras.filter(e => (uses.get(e.id) || 0) < LIMITS.maxSceneUses)];
+  const max = role === 'demonstration' || role === 'features' ? p.max * 1.4 : p.max; // demonstrations may run longer
+  const want = seconds > max ? Math.max(2, Math.round(seconds / p.ideal)) : 1;
+  const free = (sc, len, map) => {
+    const busy = (map.get(sc.id) || []).sort((a, b) => a[0] - b[0]);
+    let t = sc.id === primary.id ? Math.max(sc.start, Math.min(shotStart + firstOffset, sc.end - len)) : sc.start;
+    for (let guard = 0; guard < 20; guard++) {
+      const hit = busy.find(([a, b]) => t < b - 0.01 && t + len > a + 0.01);
+      if (!hit) break;
+      t = hit[1];
+    }
+    return t + len <= sc.end + 0.001 ? t : null;
+  };
   for (let n = Math.min(want, 6); n >= 1; n--) {
     const L = seconds / n;
     if (n > 1 && L < p.min) continue;
-    const cursor = new Map(), pieces = [];
+    // The closing shot keeps the strongest scene last, long enough for the CTA graphics of Module 7.
+    // (closing: other angles first, the strongest closing scene always last)
+    const order = closing && n > 1 ? [...Array.from({ length: n - 1 }, (_, k) => (extras.length ? extras[k % extras.length] : primary)), primary] : [primary, ...extras];
+    const local = new Map([...taken].map(([k, v]) => [k, [...v]]));
+    const pieces = [];
     let ok = true;
     for (let i = 0; i < n; i++) {
-      const sc = sources[i % sources.length];
-      const startAt = cursor.has(sc.id) ? cursor.get(sc.id) : sc.id === scene.id ? Math.max(sc.start, Math.min(shot.source_start + (i === 0 ? firstOffset : 0), sc.end)) : sc.start;
-      if (n > 1 && startAt + L > sc.end + 0.001) { ok = false; break; }
-      pieces.push({ scene: sc, from: startAt, len: L });
-      cursor.set(sc.id, startAt + L);
+      const sc = order[i % order.length];
+      const t = free(sc, L, local);
+      if (t === null) { ok = false; break; } // does not fit: try fewer pieces, then variable lengths below
+      const from = t ?? Math.max(sc.start, Math.min(shotStart, sc.end));
+      pieces.push({ scene: sc, from, len: L });
+      local.set(sc.id, [...(local.get(sc.id) || []), [from, from + L]]);
     }
-    if (ok) return pieces;
+    if (ok) { for (const [k, v] of local) taken.set(k, v); return pieces; }
   }
-  return [{ scene, from: Math.max(scene.start, Math.min(shot.source_start, scene.end)), len: seconds }];
+  // Equal pieces did not fit: fill the window with variable lengths from the free parts of the relevant scenes
+  // (closing: the main closing scene last, as long as possible up to the CTA moment).
+  const freeSpan = (sc, map) => {
+    const busy = (map.get(sc.id) || []).slice().sort((a, b) => a[0] - b[0]);
+    let best = [0, 0], t = sc.start;
+    for (const [a, b] of [...busy, [sc.end, sc.end]]) { if (a - t > best[1] - best[0]) best = [t, Math.min(a, sc.end)]; t = Math.max(t, b); }
+    return best;
+  };
+  const local = new Map([...taken].map(([k, v]) => [k, [...v]]));
+  const take = (sc, len) => { const [a] = freeSpan(sc, local); local.set(sc.id, [...(local.get(sc.id) || []), [a, a + len]]); return { scene: sc, from: a, len }; };
+  let rem = seconds;
+  const head = [], tail = [];
+  if (closing) { const [a, b] = freeSpan(primary, local); const len = Math.min(b - a, rem, Math.max(p.ideal, 2.5, rem - p.max * 4)); if (len >= p.min * 0.8) { tail.push(take(primary, len)); rem -= len; } }
+  const srcs = closing ? extras : [primary, ...extras];
+  for (let pass = 0; pass < 3 && rem > 0.01 && head.length < 8; pass++) {
+    let added = false;
+    for (const sc of srcs) {
+      if (rem <= 0.01 || head.length >= 8) break;
+      const [a, b] = freeSpan(sc, local), avail = b - a;
+      if (avail < Math.min(p.min * 0.8, rem)) continue;
+      const len = Math.min(avail, rem <= max ? rem : Math.max(p.min, Math.min(p.ideal, rem - p.min)));
+      head.push(take(sc, len)); rem -= len; added = true;
+    }
+    if (!added) break;
+  }
+  const pieces = [...head, ...tail];
+  if (pieces.length) {
+    // Anything left goes to the pieces that still have footage after them, then to the last one (a short hold at worst).
+    for (const pc of pieces) { if (rem <= 0.01) break; const after = pc.scene.end - (pc.from + pc.len); const busyAfter = (local.get(pc.scene.id) || []).some(([a]) => a >= pc.from + pc.len - 0.01 && a < pc.from + pc.len + 0.01 && a !== pc.from); const add = busyAfter ? 0 : Math.min(after, rem); pc.len += add; rem -= add; }
+    if (rem > 0.01) pieces.at(-1).len += rem;
+    for (const [k, v] of local) taken.set(k, v);
+    return pieces;
+  }
+  return [{ scene: primary, from: Math.max(primary.start, Math.min(shotStart, primary.end)), len: seconds }];
 }
 
 // Build the EDL. ctx: { edit, pkg, pp, scenes (Map), usable (Set), director, prev (EDL, for locked clips), settings }
@@ -52,41 +132,68 @@ export function buildEdl({ edit, pkg, pp, scenes, usable, director, prev = null,
   const totalFrames = Math.round(sync.final_duration * fps);
   const F = t => Math.round(t * fps);
   const dec = new Map((director?.shots || []).map(s => [s.shot_id, s]));
-  const lockedPrev = new Map((prev?.tracks.video || []).filter(c => c.locked).map(c => [c.id, c]));
-  const uses = new Map(), notes = [];
+  const lockedPrev = (prev?.tracks.video || []).filter(c => c.locked);
+  const words = pkg.captions?.words || [];
+  const mode = settings.selection === 'storyboard' ? 'storyboard' : 'improve';
+  const sel = selectScenes({ sync, pp, scenes, usable, mode, lockedShots: new Set(lockedPrev.map(c => c.shot_id)), outShort: Math.min(W, H) });
+  const taken = new Map(), placed = [];
   const clips = [];
   sync.shots.forEach((shot, si) => {
     const startF = si === 0 ? 0 : F(shot.timeline_start), endF = si === sync.shots.length - 1 ? totalFrames : F(shot.timeline_end);
     const frames = endF - startF;
     if (frames <= 0) return;
-    const scene = scenes.get(shot.scene_id);
+    const s = sel.shots[si], scene = s.scene;
     const d = dec.get(shot.id) || {};
     const role = sync.segments.find(w => w.id === shot.segment_id)?.role || '';
+    const closing = si === sync.shots.length - 1;
     // Locked clips of the previous version that belong to this shot are kept as they were (only retimed to the shot).
-    const keep = [...lockedPrev.values()].filter(c => c.shot_id === shot.id);
+    const keep = lockedPrev.filter(c => c.shot_id === shot.id);
     if (keep.length) {
       const tot = keep.reduce((a, c) => a + c.frames, 0) || 1;
       let at = startF;
-      keep.forEach((c, i) => { const fr = i === keep.length - 1 ? endF - at : Math.round((c.frames / tot) * frames); clips.push({ ...c, start_frame: at, frames: fr, _shot: shot }); at += fr; uses.set(c.scene_id, (uses.get(c.scene_id) || 0) + 1); });
+      keep.forEach((c, i) => { const fr = i === keep.length - 1 ? endF - at : Math.round((c.frames / tot) * frames); clips.push({ ...c, start_frame: at, frames: fr, _shot: shot }); at += fr; taken.set(c.scene_id, [...(taken.get(c.scene_id) || []), [c.source_start, c.source_end]]); });
       return;
     }
     if (!scene) { clips.push({ missing: true, id: `c${clips.length + 1}`, shot_id: shot.id, scene_id: shot.scene_id, segment_id: shot.segment_id, role, start_frame: startF, frames, _shot: shot }); return; }
-    const extras = (d.extra_scene_ids || []).map(id => scenes.get(id)).filter(sc => sc && usable.has(sc.id) && sc.id !== scene.id);
-    const pieces = plan(shot, frames / fps, scene, extras, pace, uses, si === 0 ? director?.opening?.start_offset || 0 : 0);
-    let at = startF;
+    const text = pp.voiceover.segments.find(x => x.id === shot.segment_id)?.text || '';
+    const directorExtras = (d.extra_scene_ids || []).filter(id => usable.has(id));
+    const extras = extrasFor({ shotSel: s, text, pool: sel.pool, used: placed, ph: sel.ph, outShort: Math.min(W, H), preferred: directorExtras });
+    const pieces = plan({ seconds: frames / fps, primary: scene, extras, pace, role, firstOffset: si === 0 ? director?.opening?.start_offset || 0 : 0, shotStart: s.changed ? scene.start : shot.source_start, taken, closing });
+    // Cut frames: between spoken words close to the rhythm, the closing clip at least 2.5 s when possible.
+    const cuts = cutTimes(startF / fps, endF / fps, pieces.length, words, (PACE[pace] || PACE.dynamic).min * 0.8);
+    if (closing && pieces.length > 1) { const lastStart = Math.min(cuts.at(-1), endF / fps - 2.5); if (lastStart > (cuts.at(-2) ?? startF / fps) + 0.8) cuts[cuts.length - 1] = lastStart; }
+    const bounds = [startF, ...cuts.map(F), endF];
+    // A cut moved to a word gap must not stretch a piece into frames used elsewhere: keep each piece inside its free part.
+    for (let i = 0; i < pieces.length - 1; i++) {
+      const pc = pieces[i], end = pc.from + pc.len;
+      const nextBusy = Math.min(pc.scene.end, ...(taken.get(pc.scene.id) || []).filter(([a0]) => a0 >= end - 0.01 && Math.abs(a0 - pc.from) > 0.001).map(([a0]) => a0));
+      const maxF = bounds[i] + Math.floor((nextBusy - pc.from) * fps);
+      if (bounds[i + 1] > maxF) bounds[i + 1] = Math.max(bounds[i] + 1, maxF);
+    }
     pieces.forEach((pc, i) => {
-      const fr = i === pieces.length - 1 ? endF - at : Math.round(pc.len * fps);
-      uses.set(pc.scene.id, (uses.get(pc.scene.id) || 0) + 1);
+      const at = bounds[i], fr = bounds[i + 1] - bounds[i];
+      placed.push({ scene: pc.scene, start: pc.from, end: pc.from + pc.len, order: clips.length });
+      const isPrimary = pc.scene.id === scene.id;
+      const reason = isPrimary
+        ? (s.changed ? s.reason : pieces.length > 1 && i ? `Another part of the same scene keeps the ${pace} rhythm` : `Storyboard choice${d.reason ? `: ${d.reason}` : ''}`)
+        : `Another relevant angle on the same idea (${pace} rhythm, cut between words)`;
       clips.push({ id: '', shot_id: shot.id, scene: pc.scene, segment_id: shot.segment_id, role, from: pc.from, start_frame: at, frames: fr, speed: 1,
-        crop: cropFor(pc.scene, pc.scene.id === scene.id ? d : { framing: d.framing }, aspect), motion: i === 0 && MOTIONS.includes(d.motion) ? d.motion : 'none',
+        crop: cropFor(pc.scene, isPrimary && !s.changed ? d : {}, aspect), motion: i === 0 && MOTIONS.includes(d.motion) ? d.motion : 'none',
         transition_in: { type: i === 0 && TRANSITIONS.includes(d.transition_in) ? d.transition_in : 'hard_cut', duration: LIMITS.transition },
-        reason: pc.scene.id === scene.id ? (pieces.length > 1 && i ? `Another part of the same scene keeps the ${pace} rhythm` : `Storyboard choice${d.reason ? `: ${d.reason}` : ''}`) : `Extra relevant scene for a long segment (${pace} pace)`,
-        source: pc.scene.id === scene.id ? 'storyboard' : 'director', locked: false });
-      at += fr;
+        reason, source: isPrimary ? (s.changed ? 'engine' : 'storyboard') : 'engine', locked: false, storyboard_scene_id: isPrimary && s.changed ? s.original : undefined,
+        closing: closing && i === pieces.length - 1 ? true : undefined, clean: cleanliness(pc.scene).class });
     });
   });
   // Source windows: inside the scene; if the scene is too short use (in this order) an earlier start, a slightly slower
   // speed, a short hold of the last frame; otherwise the clip is reported as missing footage (blocking).
+  const out = finishClips(clips, scenes, fps);
+  const edl = finish({ edit, pkg, pp, out, fps, aspect, W, H, totalFrames, pace, settings, director });
+  edl.selection = { mode, changes: sel.changes };
+  const last = out.at(-1);
+  edl.closing = last && !last.missing ? { clip_id: last.id, start: last.timeline_start, end: last.timeline_end, cta_zone: { bottom: edl.safe_area.bottom, note: 'Reserved for the CTA graphics of Module 7' } } : null;
+  return edl;
+}
+function finishClips(clips, scenes, fps) {
   const out = clips.map((c, i) => {
     const id = c.id || `c${i + 1}`;
     if (c.missing) return { ...c, id };
@@ -105,9 +212,10 @@ export function buildEdl({ edit, pkg, pp, scenes, usable, director, prev = null,
     const srcLen = Math.min(avail, (need - hold) * speed);
     return { id, order: i + 1, shot_id: c.shot_id, asset_id: sc.asset_id, scene_id: sc.id, source_key: sc.proxy_key || '', segment_id: c.segment_id, role: c.role,
       source_start: r3(from), source_end: r3(from + srcLen), timeline_start: r3(c.start_frame / fps), timeline_end: r3((c.start_frame + c.frames) / fps), start_frame: c.start_frame, frames: c.frames,
-      speed: r3(speed), crop: c.crop, position: { x: 0.5, y: 0.5 }, scale: 1, motion: c.motion, hold, transition_in: c.transition_in, reason: c.reason, locked: !!c.locked, source: c.source };
+      speed: r3(speed), crop: c.crop, position: { x: 0.5, y: 0.5 }, scale: 1, motion: c.motion, hold, transition_in: c.transition_in, reason: c.reason, locked: !!c.locked, source: c.source,
+      ...(c.closing ? { closing: true } : {}), clean: c.clean || cleanliness(sc).class, ...(c.storyboard_scene_id ? { storyboard_scene_id: c.storyboard_scene_id } : {}) };
   });
-  return finish({ edit, pkg, pp, out, fps, aspect, W, H, totalFrames, pace, settings, notes, director });
+  return out;
 }
 
 // Common tail: transitions checked, audio tracks, reserved Module 7 tracks, validation.
@@ -170,11 +278,12 @@ export function validateEdl(edl, { scenes, usable, outSize = null }) {
     const [ow, oh] = outSize || [edl.timeline.width, edl.timeline.height];
     if (sc.width && sc.height) {
       const cover = Math.max(ow / sc.width, oh / sc.height) * (c.crop?.zoom || 1);
-      if (cover > 1.6) W('low_res', `Clip ${c.order}: footage is ${sc.width}×${sc.height}, enlarged ${cover.toFixed(1)}× for ${ow}×${oh}: it may look soft.`, c.id);
+      if (cover > 1.25) W('low_res', `Clip ${c.order}: footage is ${sc.width}×${sc.height}; it must be enlarged ${cover.toFixed(1)}× for ${ow}×${oh}. Enlarging adds no detail: it will look softer (upload a higher-resolution source for production).`, c.id);
     }
     if (sc.details?.product_visible === false) W('visibility', `Clip ${c.order}: the product is not visible in this scene (Module 2 analysis).`, c.id);
-    if (sc.details?.watermark?.present) W('watermark', `Clip ${c.order}: a watermark or handle was seen (${sc.details.watermark.text || 'logo'}). It is not removed: use footage you are allowed to use commercially.`, c.id);
-    if ((sc.details?.text_overlays || []).length) W('embedded_text', `Clip ${c.order}: the footage has text on it ("${sc.details.text_overlays.slice(0, 2).join('", "')}").`, c.id);
+    const cl = cleanliness(sc);
+    if (cl.class === 'review') W('watermark', `Clip ${c.order}: ${cl.reasons.join(', ')}. Not removed: use footage you are allowed to use commercially (needs manual review).`, c.id);
+    else if (cl.class !== 'clean') W(cl.class === 'graphics' ? 'graphics' : 'embedded_text', `Clip ${c.order}: ${cl.label.toLowerCase()} (${cl.reasons.join(', ')}${sc.details?.text_overlays?.length ? `: "${sc.details.text_overlays.slice(0, 2).join('", "')}"` : ''}).`, c.id);
   }
   if (at !== edl.timeline.frames) E('total', `Clips end at frame ${at}, the timeline has ${edl.timeline.frames} frames.`);
   for (const [id, n] of uses) if (n > LIMITS.maxSceneUses) W('repetition', `Scene ${id} is used ${n} times.`);

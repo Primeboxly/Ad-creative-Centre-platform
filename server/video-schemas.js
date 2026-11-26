@@ -9,9 +9,9 @@ export const FPS_ALLOWED = [24, 25, 30, 60];
 export const DEFAULT_FPS = FPS_ALLOWED.includes(num('VD_FPS', 30)) ? num('VD_FPS', 30) : 30;
 // Preview: smaller and fast, for review. Standard: normal production. High: approved outputs.
 export const QUALITY = {
-  preview: { scale: 0.5, preset: process.env.VD_PREVIEW_PRESET || 'veryfast', crf: num('VD_PREVIEW_CRF', 28), clip_crf: 23, audio_kbps: 128, label: 'Preview' },
-  standard: { scale: 1, preset: process.env.VD_STANDARD_PRESET || 'medium', crf: num('VD_STANDARD_CRF', 21), clip_crf: 17, audio_kbps: 192, label: 'Standard' },
-  high: { scale: 1, preset: process.env.VD_HIGH_PRESET || 'slow', crf: num('VD_HIGH_CRF', 18), clip_crf: 15, audio_kbps: 256, label: 'High' },
+  preview: { scale: 0.5, preset: process.env.VD_PREVIEW_PRESET || 'veryfast', crf: num('VD_PREVIEW_CRF', 28), clip_crf: 23, audio_kbps: 128, label: 'Preview (review only)' },
+  standard: { scale: 1, preset: process.env.VD_STANDARD_PRESET || 'medium', crf: num('VD_STANDARD_CRF', 21), clip_crf: 17, audio_kbps: 192, label: 'Production' },
+  high: { scale: 1, preset: process.env.VD_HIGH_PRESET || 'slow', crf: num('VD_HIGH_CRF', 18), clip_crf: 15, audio_kbps: 256, label: 'Production High' },
 };
 export const outputSize = (aspect, quality = 'standard') => {
   const [w, h] = FORMATS[aspect] || FORMATS['9:16'];
@@ -20,10 +20,10 @@ export const outputSize = (aspect, quality = 'standard') => {
 };
 // Shot length guidelines per pace (seconds): ideal and maximum before a cut is added inside a long segment.
 export const PACE = {
-  slow: { ideal: num('VD_SLOW_SHOT', 4), max: 6, min: 1.2, label: 'Slow' },
-  balanced: { ideal: num('VD_BALANCED_SHOT', 2.8), max: 4.5, min: 0.9, label: 'Balanced' },
-  dynamic: { ideal: num('VD_DYNAMIC_SHOT', 2), max: 3.2, min: 0.7, label: 'Dynamic' },
-  fast: { ideal: num('VD_FAST_SHOT', 1.4), max: 2.4, min: 0.5, label: 'Fast' },
+  slow: { ideal: num('VD_SLOW_SHOT', 4), max: 6, min: 2, label: 'Slow' },
+  balanced: { ideal: num('VD_BALANCED_SHOT', 2.8), max: 4.2, min: 1.5, label: 'Balanced' },
+  dynamic: { ideal: num('VD_DYNAMIC_SHOT', 2.2), max: 3, min: 1.5, label: 'Dynamic' },          // about 1.5-3 s per shot
+  fast: { ideal: num('VD_FAST_SHOT', 1.5), max: 2.2, min: 0.9, label: 'Fast' },
 };
 export const TRANSITIONS = ['hard_cut', 'crossfade', 'fade_in', 'fade_out', 'dip_to_black'];
 export const FRAMINGS = ['smart_crop', 'center_crop', 'fit_background', 'product_focus', 'manual'];

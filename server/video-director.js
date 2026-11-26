@@ -7,8 +7,9 @@ import { createHash } from 'node:crypto';
 import { db } from './db.js';
 import { callJson } from './ai.js';
 import { FRAMINGS, MOTIONS, TRANSITIONS, PACE } from './video-schemas.js';
+import { cleanliness } from './video-select.js';
 
-export const PROMPT_VERSION = 'vd-v1';
+export const PROMPT_VERSION = 'vd-v2';
 const S = { type: 'string' }, N = { type: 'number' }, I = { type: 'integer' };
 const obj = (p, r = Object.keys(p)) => ({ type: 'object', additionalProperties: false, required: r, properties: p });
 const AI_FRAMINGS = FRAMINGS.filter(f => f !== 'manual');
@@ -29,6 +30,8 @@ Decide, for every shot id given:
 - motion: none by default; zoom_in or zoom_out only when it helps (static product shot, hook emphasis). Never on every shot.
 - transition_in: hard_cut is the default for direct-response ads; crossfade or dip_to_black only between narrative parts of slow/storytelling ads; fade_in only on the first shot if useful. Few transitions.
 - extra_scene_ids: for a spoken segment that is long for the pace, up to 2 additional scene ids FROM THE USABLE LIST that show the same idea (relevance first, product visible, good quality, variety). Never unrelated filler.
+- Prefer footage marked clean over footage with text, graphics or watermarks for extra scenes. Prefer a different source video or camera angle over a look-alike shot.
+- The opening must be strong (product close-up, attractive product shot or clear demonstration; never packaging or unboxing unless the hook talks about it), and the last shot a strong product showcase that leaves room for a CTA.
 - The opening must be strong: start_offset = seconds to skip at the start of the first shot's scene if its beginning is weak (0 if fine, max 1.5).
 - pace: slow (premium/story), balanced (demonstration), dynamic (most short e-commerce ads), fast (energetic offers). Use the brief's pace unless it is "ai_recommended".
 Plain English, short reasons. Do not claim the ad will perform well.`;
@@ -42,7 +45,7 @@ export async function directEdit({ pp, pkg, scenes, usable, edit, userId, force 
   const used = new Set(sync.shots.map(s => s.scene_id));
   const sceneText = sc => sc && { id: sc.id, seconds: sc.duration, orientation: sc.orientation, quality: sc.quality, description: (sc.description || sc.semantic || '').slice(0, 220),
     product_visible: sc.details?.product_visible ?? null, composition: (sc.details?.composition || '').slice(0, 120), camera: sc.details?.camera_movement || '', categories: sc.categories?.map(c => c.key) || [],
-    watermark: !!sc.details?.watermark?.present, text_on_screen: (sc.details?.text_overlays || []).length > 0 };
+    watermark: !!sc.details?.watermark?.present, text_on_screen: (sc.details?.text_overlays || []).length > 0, footage: cleanliness(sc).class };
   const input = {
     product: pp.product?.name, creative_type: pp.creative_type?.name, angles: (pp.angles || []).map(a => a.name), platform: pp.platform?.name || pp.platform || '',
     aspect_ratio: pp.format?.aspect_ratio, duration: sync.final_duration, brief_pace: pp.editing_pace || 'ai_recommended', music_energy: pkg.plan?.music?.energy ?? null,

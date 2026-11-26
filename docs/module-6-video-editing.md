@@ -212,3 +212,75 @@ a full disk for real (simulated with the limit), a true server crash in the midd
 - The clip cache is not pruned automatically yet (it is small: previews ~100-300 KB per clip).
 - Waveform is shown for the voice-over only.
 - Captions, text overlays, effects, final export workflow and bulk generation are Modules 7-9.
+
+## Editing quality update (2026-11-26)
+
+Targeted improvements after reviewing the first creatives. Module 6 was not rebuilt; no script, voice-over or music is
+regenerated.
+
+**New file** `server/video-select.js` (scene choice), changes in `video-edl.js` (cutting, cropping), `video-director.js`
+(prompt `vd-v2`), `video-production.js` (checks, undo), `video-jobs.js`, `video-routes.js`, `video-schemas.js`,
+Module 2 `footage-ai.js` / `footage.js` (analysis `scene-v2`), `public/app.js`, `public/style.css`.
+
+### What changed
+
+- **Scene choice ("Improve automatically", default; "Follow the storyboard scenes exactly" in Advanced settings).**
+  Every storyboard shot is scored: same idea as the approved scene (categories + words of the description and spoken
+  line), role fit (opening, body, closing), picture quality, angle relevance, clean footage, variety. The approved scene
+  wins ties. A *weak* approved scene (packaging the hook does not talk about, footage with text/graphics/watermark,
+  product not visible, a closing too weak or too short) may be replaced by any clean scene that fits the role. A swap
+  never brings footage that is less clean. Every swap is listed on the page with its reason and a **Keep storyboard
+  scene** button (it puts the approved scene back and locks the clip). Locked clips are never changed.
+- **Opening**: product close-ups, attractive product shots, clear demonstrations, movement, high quality and product
+  visible score higher; packaging/unboxing is penalised unless the hook mentions the box.
+- **Closing**: attractive showcase, close-up, product in use, stable picture with space (composition notes), clean
+  footage; the closing clip is the strongest one and lasts at least 2.5 s when possible; it is marked in the EDL
+  (`closing`, CTA zone) for Module 7.
+- **Variety**: look-alike detection from Module 2's picture fingerprints (duplicates / similar scenes, Hamming distance)
+  plus continuous parts of one shot; penalties for repeating a scene, for look-alikes nearby (also against the next
+  shot), for the same source video twice in a row and the same camera style; used source intervals are tracked so the
+  same frames are never shown twice.
+- **Rhythm**: dynamic ≈ 1.5-3 s per shot (ideal 2.2), fast 0.9-2.2, balanced 1.5-4.2, slow 2-6; demonstrations may run
+  up to 40 % longer. Long spoken segments get several clips (other relevant angles first, then other parts of the same
+  scene, with variable lengths when needed). **Cuts are placed between spoken words** (word timing of the voice-over).
+- **Clean footage**: classes *clean*, *embedded text* (captions, promo text), *graphic overlays* (arrows, emojis,
+  stickers, banners), *needs manual review* (watermark). Module 2's analysis now also detects added captions, promo text,
+  arrows/stickers and graphics separately, and the product position. Scenes analysed before keep working from their
+  on-screen text (emoji/arrow and promo words detected) and the page offers **Re-analyse them** (AI, one analysis per
+  scene). Clean footage is preferred everywhere; if more than 30 % of the clips are not clean, the page recommends
+  uploading clean, authorized footage. Watermarks are never removed.
+- **Cropping**: with a product position, the crop is placed so the whole product (and the hand using it) stays in, a
+  small product can be shown closer, a product wider than the crop keeps the whole frame on a blurred background;
+  without a position, people or wide actions keep the whole frame and other crops are centred and flagged for review.
+  The framing basis is shown per clip; manual framing still wins.
+- **Quality**: labels now say *Preview (review only)* 540×960 / 540×540 / 540×675 / 960×540 and *Production*
+  1080×1920 / 1080×1080 / 1080×1350 / 1920×1080 (*Production High* = same size, better encoding). Production reads the
+  original picture when the silent copy is smaller. Clips enlarged more than 1.25× are flagged ("enlarging adds no
+  detail").
+- **Duration**: blocking check that the timeline equals the approved audio length (Module 5 duration rules), and that
+  the voice ends at least 0.3 s before the end (CTA not cut); a warning explains when the video is longer than the
+  target because the real voice-over needed it. Output duration is still measured after rendering.
+
+### Before / after (measured)
+
+Same approved script, voice-over and music (20 s, 9:16, dynamic), test footage reproducing the reported problems
+(storyboard opening on a packaging box, look-alike close-ups from one video, re-posted promo footage with captions,
+emojis and arrows, a watermarked clip at the end). "Before" = the previous engine (exact copy of the deployed version),
+"after" = this version. Test-mode AI; real FFmpeg renders.
+
+| | Before | After |
+|---|---|---|
+| Render | **failed**: closing shot 4 s for a 9.8 s CTA moment (5 s frozen frame) | 20.000 s, 600/600 frames, quality check passed |
+| Opening | packaging box (clean but weak) | hand closing the clasp, close-up (clean, product visible) |
+| Closing | watermarked promo clip, 9.8 s | clean lifestyle shot, 2.5 s, after 3 other relevant angles |
+| Clips with captions/graphics/watermark | 3 of 7 | 1 of 11 (no clean alternative for that line: warning shown) |
+| Look-alike clips side by side | 1 | 0 |
+| Same frames shown twice | 1 | 0 |
+| Shot lengths | 1.5-9.8 s | 1.4-2.5 s (9 of 10 body shots 1.5-3 s) |
+| Cuts inside a spoken word | 0 of 6 | 0 of 10 |
+| Crops placed on the product position | 0 | 8 (2 wide shots kept whole on a blurred background, 0 uncertain) |
+| Clip start vs real speech | ≤ 0.013 s | ≤ 0.013 s |
+| Render time (preview) | — | 5-7 s |
+
+The real luxury watch creatives on Railway were not re-rendered from here (no access to the production server):
+open them in step 9 after this update and click **↻ Regenerate timeline**, then **Render preview**.

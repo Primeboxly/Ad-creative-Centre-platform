@@ -295,3 +295,77 @@ test('approval: preview refused, standard approved, package for Module 7, edits 
   assert.equal(VP.approvedVideoPackage(proj, 1), null);
   assert.equal(VP.readyVideos(proj).filter(v => v.latest).length, 1);
 });
+
+// ---------- Editing quality improvements (hook, closing, diversity, clean footage, crops, rhythm) ----------
+const SEL = await import('../server/video-select.js');
+const mkScene = (id, cats, details = {}, extra = {}) => ({ id, asset_id: extra.asset_id ?? id, start: 0, end: 4, duration: 4, width: extra.w ?? 720, height: extra.h ?? 1280, quality: extra.q ?? 80,
+  categories: cats.map(key => ({ key })), angles: [{ score: 70 }], semantic: extra.semantic || cats.join(' '), description: extra.semantic || '', measured: { motion: 20 },
+  details: { product_visible: true, composition: 'product centred', camera_movement: 'handheld', graphics: { captions: false, promo_text: false, arrows_stickers: false, other_graphics: false }, ...details } });
+
+test('clean footage classes: clean, embedded text, graphic overlays, watermark review; old analyses use their text', () => {
+  assert.equal(SEL.cleanliness(mkScene(1, ['closeup'])).class, 'clean');
+  assert.equal(SEL.cleanliness(mkScene(2, ['closeup'], { graphics: { captions: true, promo_text: false, arrows_stickers: false, other_graphics: false } })).class, 'text');
+  assert.equal(SEL.cleanliness(mkScene(3, ['closeup'], { graphics: { captions: false, promo_text: true, arrows_stickers: true, other_graphics: false } })).class, 'graphics');
+  assert.equal(SEL.cleanliness(mkScene(4, ['closeup'], { watermark: { present: true, text: '@shop' } })).class, 'review');
+  const old = mkScene(5, ['closeup'], { graphics: undefined, text_overlays: ['50% OFF 🔥'] });
+  delete old.details.graphics;
+  const c = SEL.cleanliness(old);
+  assert.equal(c.class, 'graphics'); assert.equal(c.detailed, false);
+});
+
+test('hook avoids packaging the hook does not mention; closing prefers a clean showcase; swaps never bring dirtier footage', () => {
+  const box = mkScene(10, ['packaging', 'unboxing'], {}, { semantic: 'closed watch box on a table' });
+  const dial = mkScene(11, ['closeup', 'hook'], {}, { semantic: 'close-up of the gold watch dial' });
+  const promo = mkScene(12, ['showcase', 'cta'], { watermark: { present: true, text: '@x' } }, { semantic: 'watch on display' });
+  const show = mkScene(13, ['showcase', 'closeup'], { camera_movement: 'static', composition: 'product centred on a plain background' }, { semantic: 'watch on display, side view' });
+  const sticker = mkScene(14, ['closeup', 'hook'], { graphics: { captions: false, promo_text: true, arrows_stickers: true, other_graphics: false } }, { semantic: 'close-up of the gold watch dial with arrows' });
+  const scenes = new Map([box, dial, promo, show, sticker].map(s => [s.id, s]));
+  const sync = { shots: [{ id: 'k1', scene_id: 10, segment_id: 's1', duration: 2.5 }, { id: 'k2', scene_id: 11, segment_id: 's2', duration: 2 }, { id: 'k3', scene_id: 12, segment_id: 's3', duration: 3 }] };
+  const pp = { voiceover: { segments: [{ id: 's1', text: 'Looking for the perfect gift?' }, { id: 's2', text: 'See the gold dial.' }, { id: 's3', text: 'Order now.' }] } };
+  const r = SEL.selectScenes({ sync, pp, scenes, usable: new Set(scenes.keys()) });
+  assert.notEqual(r.shots[0].scene.id, 10, 'no packaging opening');
+  assert.equal(r.shots[0].clean.class, 'clean');
+  assert.equal(r.shots[2].scene.id, 13, 'clean product showcase to close');
+  assert.ok(r.changes.every(c => c.reason));
+  assert.ok(r.shots.every(s => s.scene.id !== 14), 'footage with stickers never chosen over clean footage');
+  const strict = SEL.selectScenes({ sync, pp, scenes, usable: new Set(scenes.keys()), mode: 'storyboard' });
+  assert.deepEqual(strict.shots.map(s => s.scene.id), [10, 11, 12], 'storyboard mode keeps every approved scene');
+  // A hook that talks about the box may open on it.
+  const pp2 = { voiceover: { segments: [{ id: 's1', text: 'Look at this box!' }, ...pp.voiceover.segments.slice(1)] } };
+  assert.equal(SEL.selectScenes({ sync, pp: pp2, scenes, usable: new Set(scenes.keys()) }).shots[0].scene.id, 10);
+});
+
+test('cropping keeps the whole product: product position → crop around it, too wide → whole frame, unknown → flagged', async () => {
+  const { cropFor } = VE;
+  const wide = mkScene(20, ['lifestyle'], { product_box: { present: true, x: 0.6, y: 0.3, w: 0.2, h: 0.4 } }, { w: 1920, h: 1080 });
+  const c = cropFor(wide, {}, '9:16');
+  const cw = (9 / 16) / (1920 / 1080);
+  const left = c.x * (1 - cw / c.zoom), right = left + cw / c.zoom;
+  assert.ok(left <= 0.6 + 0.001 && right >= 0.8 - 0.001, `product inside the crop (${left.toFixed(3)}-${right.toFixed(3)})`);
+  assert.equal(c.uncertain, false);
+  const tooWide = mkScene(21, ['lifestyle'], { product_box: { present: true, x: 0.1, y: 0.3, w: 0.8, h: 0.4 } }, { w: 1920, h: 1080 });
+  assert.equal(cropFor(tooWide, {}, '9:16').mode, 'fit_background', 'never cut a wide product');
+  const unknown = mkScene(22, ['showcase'], { composition: 'product centred' }, { w: 1920, h: 1080 });
+  assert.equal(cropFor(unknown, {}, '9:16').uncertain, true);
+  const people = mkScene(23, ['lifestyle'], { composition: 'wide shot, two people', human_interaction: 'two people' }, { w: 1920, h: 1080 });
+  assert.equal(cropFor(people, {}, '9:16').mode, 'fit_background', 'conservative when people and no position');
+});
+
+test('rhythm and duration: dynamic shots about 1.5-3 s, cuts between words, timeline = approved audio, CTA kept', () => {
+  const s = VP.editState(edit.id, admin);
+  const inp = VP.loadInputs(VP.editRow(edit.id));
+  const fresh = VE.buildEdl({ edit: VP.editRow(edit.id), pkg: inp.pkg, pp: inp.pp, scenes: inp.scenes, usable: inp.usable, director: null });
+  const fps = fresh.timeline.fps;
+  const body = fresh.tracks.video.slice(0, -1).map(c => c.frames / fps);
+  assert.ok(body.filter(x => x <= 3.3).length >= body.length - 1, `shots ${body.map(x => x.toFixed(1))}`);
+  const pkg = AP.latestPackage(prod.id).package;
+  const words = pkg.captions.words;
+  const inside = fresh.tracks.video.slice(1).filter(c => words.some(w => c.timeline_start > w.start + 0.04 && c.timeline_start < w.end - 0.04));
+  assert.equal(inside.length, 0, 'no cut in the middle of a word');
+  assert.ok(fresh.closing && fresh.tracks.video.at(-1).closing);
+  assert.equal(fresh.timeline.duration, pkg.synchronized_storyboard.final_duration);
+  assert.ok(!s.validation.errors.some(e => e.code === 'duration_mismatch' || e.code === 'cta_cut'));
+  const bad = structuredClone(s.edl); bad.timeline.duration += 1;
+  const val = VP.validateVersion(VP.editRow(edit.id), bad);
+  assert.ok(val.errors.some(e => e.code === 'duration_mismatch'));
+});

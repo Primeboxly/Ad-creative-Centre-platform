@@ -9,6 +9,7 @@ import { sceneRows } from './footage-services.js';
 import { productionRow as auProduction, productionPlanOf, isOutdated as sbOutdated, checkPackage } from './audio-production.js';
 import { voiceoverRow } from './audio-voice.js';
 import { validateEdl, relayout, edlHash } from './video-edl.js';
+import { cleanReport, cleanliness } from './video-select.js';
 import { FRAMINGS, MOTIONS, TRANSITIONS, LIMITS, SPEED_RANGE, QUALITY, outputSize, STATUSES, EDL_VERSION, PACE } from './video-schemas.js';
 
 const parse = (s, d) => { try { return s ? JSON.parse(s) ?? d : d; } catch { return d; } };
@@ -100,6 +101,17 @@ export function saveDocs(versionId, docs) {
 export function validateVersion(edit, edl, inputs = loadInputs(edit)) {
   const val = validateEdl(edl, { scenes: inputs.scenes, usable: inputs.usable });
   for (const m of inputProblems(edit, inputs)) val.errors.unshift({ code: 'outdated', message: m });
+  // Duration: the timeline must be exactly the approved audio length (Module 5 decided it: target, or longer when the
+  // voice-over needs it and the team accepted); the voice and a short CTA moment after it are never cut.
+  const approved = inputs.pkg.synchronized_storyboard.final_duration, fps = edl.timeline.fps;
+  if (Math.abs(edl.timeline.duration - approved) > 1 / fps + 0.001) val.errors.push({ code: 'duration_mismatch', message: `The timeline lasts ${edl.timeline.duration} s but the approved audio lasts ${approved} s.` });
+  const vo = edl.tracks.voiceover;
+  if (vo && vo.speech_end + 0.3 > edl.timeline.duration + 0.001) val.errors.push({ code: 'cta_cut', message: `The voice-over ends at ${vo.speech_end} s: less than 0.3 s before the end of the video. The CTA would be cut.` });
+  const target = inputs.pp.format?.duration_seconds;
+  if (target && Math.abs(approved - target) > 0.5) val.warnings.push({ code: 'duration_target', message: `The video lasts ${approved} s instead of the ${target} s target: this length was set by the real voice-over and approved in step 8.` });
+  const cr = cleanReport(edl.tracks.video, inputs.scenes, inputs.usable);
+  if (cr.insufficient) val.warnings.push({ code: 'clean_footage', message: `${cr.not_clean_share} % of the clips have embedded text, graphics or watermarks: not enough clean footage for this video. Upload clean, authorized footage (no captions, stickers or watermarks) for better results.` });
+  if (cr.undetailed.length) val.warnings.push({ code: 'analysis_old', message: `${cr.undetailed.length} usable scene(s) were analysed before overlay and product-position detection: re-analyse them for cleaner choices and safer crops.` });
   val.valid = !val.errors.length;
   edl.validation = { valid: val.valid, errors: val.errors.length, warnings: val.warnings.length, checked_at: val.checked_at };
   return val;
@@ -138,7 +150,9 @@ export function applyEdit(editId, body, user) {
     if (b.scene_id !== undefined) {
       const sc = inputs.scenes.get(Number(b.scene_id));
       if (!sc || !inputs.usable.has(sc.id)) throw new HttpError(400, 'This scene is not usable for this video (excluded, not silent or not in the brief).');
-      Object.assign(c, { scene_id: sc.id, asset_id: sc.asset_id, source_key: '', missing: undefined, reason: 'Chosen by the team', source: 'team', ...fitSource(sc, c.frames / fps, sc.start) });
+      const back = c.storyboard_scene_id === sc.id;
+      Object.assign(c, { scene_id: sc.id, asset_id: sc.asset_id, source_key: '', missing: undefined, reason: back ? 'Storyboard scene kept by the team' : 'Chosen by the team', source: back ? 'storyboard' : 'team', clean: cleanliness(sc).class, ...fitSource(sc, c.frames / fps, sc.start) });
+      delete c.storyboard_scene_id;
       if (!c.crop) c.crop = { mode: 'center_crop', x: 0.5, y: 0.5, zoom: 1, uncertain: false };
       c.position = c.position || { x: 0.5, y: 0.5 }; c.scale = c.scale || 1; c.motion = c.motion || 'none'; c.transition_in = c.transition_in || { type: 'hard_cut', duration: LIMITS.transition };
       c.order = c.order || i + 1; c.timeline_start = c.timeline_start ?? r3(c.start_frame / fps); c.timeline_end = c.timeline_end ?? r3((c.start_frame + c.frames) / fps);
@@ -191,6 +205,7 @@ export function applyEdit(editId, body, user) {
     const s = { ...d.settings };
     if (body.settings.pace !== undefined) { if (!PACE[body.settings.pace] && body.settings.pace !== '') throw new HttpError(400, 'Unknown pace'); s.pace = body.settings.pace; }
     if (body.settings.framing !== undefined) { if (!FRAMINGS.includes(body.settings.framing) && body.settings.framing !== '') throw new HttpError(400, 'Unknown framing'); s.framing = body.settings.framing; }
+    if (body.settings.selection !== undefined) { if (!['improve', 'storyboard'].includes(body.settings.selection)) throw new HttpError(400, 'Unknown selection mode'); s.selection = body.settings.selection; }
     saveDocs(v.id, { settings: s });
   }
   relayout(edl);
@@ -303,9 +318,10 @@ export function editState(editId, user) {
     ...d, renders, job, versions: db.prepare(`SELECT id, number, label, frozen, approved, created_at, updated_at FROM vd_versions WHERE edit_id = ? ORDER BY number DESC`).all(editId),
     usage: { renders: usage.renders, render_seconds: Math.round(usage.wall * 10) / 10, output_mb: Math.round(usage.bytes / 1048576 * 10) / 10, peak_rss_mb: Math.round(usage.rss), clips_reused: usage.cached, clips_total: usage.clips, ai_usd: Math.round(ai.usd * 1000) / 1000, ai_calls: ai.calls },
     scenes: inputs ? [...inputs.usable].map(id => inputs.scenes.get(id)).filter(Boolean).map(s => ({ id: s.id, asset_id: s.asset_id, start: s.start, end: s.end, duration: s.duration, orientation: s.orientation, width: s.width, height: s.height, quality: s.quality,
-      description: s.description, semantic: s.semantic, categories: s.categories.map(c => c.key), used: used.has(s.id), product_visible: s.details?.product_visible ?? null })) : [],
+      description: s.description, semantic: s.semantic, categories: s.categories.map(c => c.key), used: used.has(s.id), product_visible: s.details?.product_visible ?? null, clean: cleanliness(s) })) : [],
     waveform: vo?.peaks || [], lead_in: pkg?.mix?.lead_in ?? 0, qualities: Object.fromEntries(Object.entries(QUALITY).map(([k, q]) => [k, { label: q.label, size: outputSize(pp?.format?.aspect_ratio || '9:16', k) }])),
     package: latestPackage(editId), statuses: STATUSES, edl_version: EDL_VERSION,
+    clean: d.edl && inputs ? cleanReport(d.edl.tracks.video, inputs.scenes, inputs.usable) : null, target_duration: pp?.format?.duration_seconds ?? null,
   };
 }
 export const hashOf = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');

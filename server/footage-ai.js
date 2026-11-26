@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { callJson, aiMock } from './ai.js';
 import { productContext } from './strategy.js';
 
-export const PROMPT_VERSION = 'scene-v1';
+export const PROMPT_VERSION = 'scene-v2';
 
 export const CATEGORIES = {
   hook: 'Hook Footage', closeup: 'Product Close-up', showcase: 'Product Showcase', demonstration: 'Product Demonstration',
@@ -30,7 +30,7 @@ const ANGLE_LINKS = {
 const SCENE = {
   type: 'object', additionalProperties: false,
   required: ['ref', 'description', 'semantic', 'objects', 'product_visible', 'features_shown', 'benefits_supported', 'human_interaction', 'environment',
-    'camera_movement', 'composition', 'text_overlays', 'watermark', 'origin', 'relevance', 'relevance_note', 'quality', 'categories', 'tags', 'placements', 'angles'],
+    'camera_movement', 'composition', 'text_overlays', 'watermark', 'graphics', 'product_box', 'origin', 'relevance', 'relevance_note', 'quality', 'categories', 'tags', 'placements', 'angles'],
   properties: {
     ref: str,
     description: { type: 'string', description: 'What happens in the scene, 1-2 plain sentences.' },
@@ -45,6 +45,10 @@ const SCENE = {
     composition: str,
     text_overlays: strList(6),
     watermark: { type: 'object', additionalProperties: false, required: ['present', 'text'], properties: { present: { type: 'boolean' }, text: str } },
+    graphics: { type: 'object', additionalProperties: false, required: ['captions', 'promo_text', 'arrows_stickers', 'other_graphics'],
+      properties: { captions: { type: 'boolean' }, promo_text: { type: 'boolean' }, arrows_stickers: { type: 'boolean' }, other_graphics: { type: 'boolean' } } },
+    product_box: { type: 'object', additionalProperties: false, required: ['present', 'x', 'y', 'w', 'h'], description: 'Where the product (and the hand using it) is in the frame, as fractions 0-1 of width/height (x, y = top-left corner), the area it covers across the frames.',
+      properties: { present: { type: 'boolean' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } } },
     origin: { type: 'string', enum: ORIGIN },
     relevance: score,
     relevance_note: str,
@@ -77,6 +81,8 @@ Rules:
 - People: describe actions, hands, gestures and setting only. Never identify anyone, and never guess age, ethnicity, religion, health, body traits or any other sensitive attribute.
 - origin: say if the footage looks like a real customer's video, staged/promotional footage, or synthetic/CGI. Staged or synthetic footage must never be presented as a real customer testimonial; "ugc" as a category only means the visual style.
 - text_overlays: copy visible on-screen text (captions, prices, brand text) briefly. watermark: platform or creator logos/handles (TikTok logo, @names), supplier marks.
+- graphics: what was ADDED on top of the filmed picture: captions/subtitles, promotional text (prices, % off, BUY NOW), arrows/emojis/stickers, other graphic overlays (frames, banners, animated shapes). Text that is physically on the product or its box is not an overlay.
+- product_box: the rectangle that contains the product (and the hand or person using it when they interact) across the frames, as fractions of the frame (x, y top-left; w, h size). present=false and zeros if the product is not visible. Approximate but never smaller than the product.
 - relevance (0-100): how much the scene is about THIS product. Footage of another product, or with nothing of the product, scores low.
 - quality (0-100 each): sharpness, lighting, stability (camera shake), product_visibility, composition; score = overall usability in a paid ad. Use the measured numbers as hints; the note is one short sentence.
 - categories: 1-4 that clearly fit. placements: where in an ad the scene could be used, with a fit 0-100; 1-5 entries.
@@ -131,6 +137,7 @@ function mockScenes(items, angles) {
       human_interaction: i % 2 ? 'a hand turns the product' : '', environment: 'indoor, home table',
       camera_movement: CAMERA[i % CAMERA.length], composition: 'product centred, close framing',
       text_overlays: i % 4 === 3 ? ['50% OFF'] : [], watermark: { present: i % 5 === 4, text: i % 5 === 4 ? '@seller' : '' },
+      graphics: { captions: false, promo_text: i % 4 === 3, arrows_stickers: false, other_graphics: false }, product_box: { present: true, x: 0.3, y: 0.25, w: 0.4, h: 0.5 },
       origin: i % 3 === 2 ? 'staged_or_promotional' : 'real_customer_style',
       relevance: 90 - (i % 4) * 15, relevance_note: 'The product is clearly in view.',
       quality: { sharpness: 80 - i * 3, lighting: 75, stability: 70, product_visibility: 85, composition: 72, score: Math.max(20, 82 - i * 6), note: 'Clear close view, a bit dark at the end.' },

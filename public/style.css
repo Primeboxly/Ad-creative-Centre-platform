@@ -1162,3 +1162,5 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; justif
 .vd-insp .au-trim input[type=range] { width: 130px; }
 .vd-cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; } .vd-cmp video { width: 100%; max-height: 50vh; background: #000; border-radius: 10px; }
 @media (max-width: 860px) { .vd-player, .vd-player.wide, .vd-insp { grid-template-columns: 1fr; } }
+.vd-swap { display: grid; grid-template-columns: 64px 16px 64px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.vd-swap img { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; background: #eef0f4; } .vd-swap p { margin: 0; }

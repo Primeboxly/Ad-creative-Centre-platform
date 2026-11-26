@@ -24,6 +24,17 @@ export function mountVideo(app, { idParam }) {
     const id = idParam(req.params.id), b = req.body || {};
     res.status(202).json({ job: enqueue(id, String(b.kind || ''), req.user, { target: b.quality || '', options: { force: !!b.force, force_render: !!b.force_render } }) });
   });
+  // Re-analyse (Module 2) the usable scenes analysed before overlay and product-position detection (AI cost: one analysis per scene).
+  app.post('/api/video-edits/:id/reanalyze-footage', async (req, res) => {
+    const id = idParam(req.params.id);
+    const st = editState(id, req.user);
+    if (!st.edit.can_edit) throw new HttpError(403, 'Not allowed');
+    const ids = (st.clean?.undetailed || []).slice(0, 60);
+    if (!ids.length) return res.json({ queued: 0 });
+    const { reanalyze } = await import('./footage.js');
+    reanalyze(ids, req.user.id);
+    res.json({ queued: ids.length });
+  });
   app.post('/api/video-edits/:id/retry', (req, res) => res.status(202).json({ job: retryFailed(idParam(req.params.id), req.user) }));
   app.post('/api/video-edits/:id/cancel', (req, res) => res.json({ cancelled: cancel(idParam(req.params.id), req.user) }));
   app.get('/api/video-edits/:id/jobs/latest', (req, res) => res.json(db.prepare(`SELECT * FROM vd_jobs WHERE edit_id = ? ORDER BY id DESC LIMIT 1`).get(idParam(req.params.id)) || null));

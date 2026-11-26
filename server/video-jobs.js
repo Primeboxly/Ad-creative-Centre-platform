@@ -132,11 +132,11 @@ async function pipeline(job, { log, stage, check, ctx, work, setRender }) {
     const { _cached, ...dir } = director;
     if (d.settings.framing) dir.shots = dir.shots.map(s => ({ ...s, framing: d.settings.framing === 'manual' ? s.framing : d.settings.framing }));
     stage('resolving_footage', 0.12);
-    const edl = buildEdl({ edit, pkg: inputs.pkg, pp: inputs.pp, scenes: inputs.scenes, usable: inputs.usable, director: dir, prev: d.edl, settings: d.edl?.audio || {} });
+    const edl = buildEdl({ edit, pkg: inputs.pkg, pp: inputs.pp, scenes: inputs.scenes, usable: inputs.usable, director: dir, prev: d.edl, settings: { ...(d.edl?.audio || {}), selection: d.settings.selection } });
     const val = validateVersion(edit, edl, inputs);
     saveDocs(v.id, { director: dir, edl, validation: val });
     d = docsOf(db.prepare(`SELECT * FROM vd_versions WHERE id = ?`).get(v.id));
-    log(`Editing plan ${_cached ? '(AI from cache)' : 'made'}: ${edl.tracks.video.length} clips, ${edl.timeline.pace} pace, ${edl.timeline.duration} s · ${val.errors.length} blocking, ${val.warnings.length} warnings`);
+    log(`Editing plan ${_cached ? '(AI from cache)' : 'made'}: ${edl.tracks.video.length} clips, ${edl.selection.changes.length} storyboard scene(s) improved, ${edl.timeline.pace} pace, ${edl.timeline.duration} s · ${val.errors.length} blocking, ${val.warnings.length} warnings`);
     if (job.kind === 'plan') return 'Editing plan ready';
     if (!val.valid) throw new HttpError(422, `The editing plan has blocking problems: ${val.errors[0].message}`);
   }
