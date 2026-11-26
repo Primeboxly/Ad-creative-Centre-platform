@@ -1,11 +1,12 @@
 import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
-import { renameSync, rmSync, writeFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { renameSync, rmSync, writeFileSync, statSync, statfsSync, readdirSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { db, tx } from './db.js';
-import { ROOT, TMP_DIR, FILES_DIR } from './paths.js';
+import { ROOT, TMP_DIR, FILES_DIR, DATA_DIR } from './paths.js';
 import { HttpError } from './errors.js';
+import { storage } from './storage.js';
 import { checkPassword, hashPassword, createSession, cookieOpts, requireAuth, requireAdmin } from './auth.js';
 import { LANGUAGES, aiReady, aiMock } from './ai.js';
 import { safeGet, extractProduct } from './fetchpage.js';
@@ -363,6 +364,22 @@ app.post('/api/products/:id/angles/selection', (req, res) => {
 });
 
 // AI usage (admin): calls, tokens, errors over the last 30 days.
+// Disk check for admins: where data lives, whether a Railway volume is attached, free space, what takes the space.
+app.get('/api/admin/storage', requireAdmin, (req, res) => {
+  const sizeOf = p => { let n = 0; try { const st = statSync(p); if (!st.isDirectory()) return st.size; for (const e of readdirSync(p)) n += sizeOf(join(p, e)); } catch {} return n; };
+  const mb = b => Math.round((b / 1048576) * 10) / 10;
+  let disk = null;
+  try { const s = statfsSync(DATA_DIR); disk = { total_mb: mb(s.blocks * s.bsize), free_mb: mb(s.bavail * s.bsize), used_mb: mb((s.blocks - s.bfree) * s.bsize) }; } catch {}
+  const folders = {};
+  try { for (const e of readdirSync(DATA_DIR)) folders[e] = mb(sizeOf(join(DATA_DIR, e))); } catch {}
+  const store = join(DATA_DIR, 'store'), inStore = {};
+  try { for (const e of readdirSync(store)) inStore[e] = mb(sizeOf(join(store, e))); } catch {}
+  res.json({
+    data_dir: DATA_DIR, railway_volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || null, railway_volume_name: process.env.RAILWAY_VOLUME_NAME || null,
+    on_volume: !!process.env.RAILWAY_VOLUME_MOUNT_PATH && DATA_DIR.startsWith(resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)), storage: storage.describe(), disk, folders_mb: folders, store_mb: inStore,
+  });
+});
+
 app.get('/api/ai-usage', requireAdmin, (req, res) => {
   res.json({
     byKind: db.prepare(`SELECT kind, COUNT(*) calls, SUM(ok) ok, SUM(1 - ok) failed, SUM(input_tokens) input_tokens, SUM(output_tokens) output_tokens, ROUND(AVG(ms)) avg_ms
