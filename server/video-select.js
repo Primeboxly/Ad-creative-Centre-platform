@@ -40,14 +40,18 @@ export function lookAlike(a, b, ph) {
   if (a.similar_to === b.id || b.similar_to === a.id || (a.similar_to && a.similar_to === b.similar_to)) return 0.75;
   const x = ph.get(a.id), y = ph.get(b.id);
   if (x && y && x.length === y.length) { const d = popcount(BigInt('0x' + x) ^ BigInt('0x' + y)); if (d <= 2) return 1; if (d <= 8) return 0.7; if (d <= 12) return 0.35; }
-  if (a.asset_id === b.asset_id && Math.abs(a.start - b.end) < 0.5) return 0.4; // continuous parts of one shot
+  if (a.asset_id === b.asset_id && (Math.abs(a.start - b.end) < 0.5 || Math.abs(b.start - a.end) < 0.5)) return 0.25; // next to each other in one video (a scene cut usually means a new shot)
+  // Same source video and almost the same description: the same action filmed again.
+  if (a.asset_id === b.asset_id && jac(words(`${a.semantic} ${a.description}`), words(`${b.semantic} ${b.description}`)) >= 0.5) return 0.5;
   return 0;
 }
 
 // ---------- Meaning ----------
 const STOP = new Set('the a an and or of to in on with for is it this that your you are be at by from as its into very can will just look watch see how get our'.split(' '));
-const words = t => new Set(String(t || '').toLowerCase().replace(/[^a-z0-9à-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w)).map(w => w.replace(/(ing|es|s|ed)$/, '')));
-const jac = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; for (const x of a) if (b.has(x)) n++; return n / (a.size + b.size - n); };
+function words(t) { return wordsOf(t); }
+const wordsOf = t => new Set(String(t || '').toLowerCase().replace(/[^a-z0-9à-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w)).map(w => w.replace(/(ing|es|s|ed)$/, '')));
+function jac(a, b) { return jacOf(a, b); }
+const jacOf = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; for (const x of a) if (b.has(x)) n++; return n / (a.size + b.size - n); };
 const GENERIC = new Set(['other', 'broll', 'human', 'ugc']);
 const cats = sc => new Set((sc?.categories || []).map(c => c.key || c));
 const meaningful = sc => new Set([...cats(sc)].filter(c => !GENERIC.has(c)));
@@ -60,6 +64,18 @@ export function sameIdea(cand, ref, segText) {
   return Math.min(1, (shared ? 0.5 + 0.15 * (shared - 1) : 0) + t * 1.2 + s * 0.8);
 }
 
+// ---------- Room for text overlays (Module 7) ----------
+// Fractions of the frame free above and below the product. Known from the product position; otherwise estimated.
+export function overlayRoom(sc) {
+  const d = sc?.details || {}, b = d.product_box;
+  if (b?.present && b.h > 0) return { top: Math.max(0, b.y), bottom: Math.max(0, 1 - b.y - b.h), basis: 'product position' };
+  const comp = d.composition || '';
+  if (/space|plain|background|minimal|negative/i.test(comp)) return { top: 0.2, bottom: 0.25, basis: 'composition notes' };
+  if (/tight|fills the frame|extreme close|macro/i.test(comp)) return { top: 0.05, bottom: 0.05, basis: 'composition notes' };
+  return { top: 0.12, bottom: 0.15, basis: 'estimate' };
+}
+const roomScore = sc => { const r = overlayRoom(sc); return (r.top >= 0.15 ? 0.1 : r.top < 0.08 ? -0.1 : 0) + (r.bottom >= 0.2 ? 0.15 : r.bottom < 0.1 ? -0.15 : 0); };
+
 // ---------- Scores ----------
 const PACK = new Set(['packaging', 'unboxing']);
 const mentionsBox = t => /(^|[^a-z])(box|boxes|unbox|packag|parcel|wrapp)/i.test(t || '');
@@ -68,11 +84,12 @@ function roleFit(sc, role, text) {
   const vis = d.product_visible === false ? -0.5 : d.product_visible ? 0.2 : 0;
   const moving = (sc.measured?.motion ?? 0) > 12 || ['handheld', 'pan', 'tilt', 'zoom', 'tracking'].includes(d.camera_movement);
   const pack = [...c].some(x => PACK.has(x)) && !mentionsBox(text);
-  if (role === 'hook') return vis * 1.5 + (c.has('closeup') ? 0.35 : 0) + (c.has('hook') ? 0.3 : 0) + (c.has('demonstration') || c.has('showcase') ? 0.2 : 0) + (moving ? 0.15 : 0) + (pack ? -0.7 : 0);
+  if (role === 'hook') return vis * 1.5 + (c.has('closeup') ? 0.35 : 0) + (c.has('hook') ? 0.3 : 0) + (c.has('demonstration') || c.has('showcase') ? 0.2 : 0) + (moving ? 0.15 : 0) + (pack ? -0.7 : 0) + roomScore(sc);
   if (role === 'closing') {
     const space = /space|background|minimal|clean|plain|centred|centered/i.test(d.composition || '');
-    return vis * 1.5 + (c.has('showcase') ? 0.35 : 0) + (c.has('closeup') ? 0.25 : 0) + (c.has('lifestyle') || c.has('demonstration') ? 0.15 : 0) + (c.has('cta') ? 0.2 : 0)
-      + (space ? 0.15 : 0) + (d.camera_movement === 'shaky' ? -0.3 : 0) + (pack ? -0.4 : 0);
+    // A clean, attractive close-up or showcase of the product closes best (people / lifestyle less so).
+    return vis * 1.5 + (c.has('showcase') ? 0.5 : 0) + (c.has('closeup') ? 0.45 : 0) + (c.has('cta') ? 0.15 : 0) + (c.has('lifestyle') || c.has('demonstration') ? 0.05 : 0)
+      + (!c.has('showcase') && !c.has('closeup') ? -0.25 : 0) + (space ? 0.1 : 0) + roomScore(sc) + (d.camera_movement === 'shaky' ? -0.3 : 0) + (pack ? -0.4 : 0);
   }
   return vis + (pack && !mentionsBox(text) ? -0.2 : 0);
 }
@@ -85,11 +102,11 @@ export function diversityPenalty(sc, from, to, used, ph) {
     const near = used.length - k <= 3;
     if (u.scene.id === sc.id) {
       if (from < u.end && to > u.start) return -5; // the same frames again
-      p -= near ? 0.6 : 0.35;
+      p -= near ? 1.0 : 0.6;
       continue;
     }
     const sim = lookAlike(sc, u.scene, ph);
-    if (sim) p -= sim * (near ? 0.6 : 0.3);
+    if (sim) p -= sim * (near ? 1.3 : 0.7);
   }
   if (last && last.scene.asset_id === sc.asset_id) p -= 0.15; // prefer another source video when equally relevant
   if (last && last.scene.details?.camera_movement && last.scene.details.camera_movement === sc.details?.camera_movement && [...meaningful(sc)][0] === [...meaningful(last.scene)][0]) p -= 0.1; // vary the camera angle
@@ -101,14 +118,20 @@ export function sceneScore(sc, { role, text, ref, used, from, to, ph, outShort }
   const angle = Math.max(0, ...(sc.angles || []).map(a => a.score || 0)) / 100;
   const idea = ref ? sameIdea(sc, ref, text) : 0.5;
   const res = sc.width && sc.height && outShort && Math.min(sc.width, sc.height) < outShort * 0.6 ? -0.15 : 0;
-  const parts = { idea: idea * 0.6, role: roleFit(sc, role, text), quality: q, angle: angle * 0.15, clean: CLEAN_PEN[cl.class], diversity: diversityPenalty(sc, from, to, used, ph), resolution: res };
+  // The closing shot is chosen first for being the best product shot: repetition counts a little less there.
+  const parts = { idea: idea * 0.6, role: roleFit(sc, role, text), quality: q, angle: angle * 0.15, clean: CLEAN_PEN[cl.class], diversity: diversityPenalty(sc, from, to, used, ph) * (role === 'closing' ? 0.6 : 1), resolution: res };
   return { score: Object.values(parts).reduce((a, b) => a + b, 0), parts, clean: cl };
 }
 
 // Choose the scene of every storyboard shot. mode 'improve' (default) or 'storyboard' (keep every approved scene).
 // Returns { shots: [{ shot, scene, original, changed, reason, clean }], changes, cleanReport }
 export function selectScenes({ sync, pp, scenes, usable, mode = 'improve', lockedShots = new Set(), outShort = 1080 }) {
-  const pool = [...usable].map(id => scenes.get(id)).filter(Boolean);
+  const all = [...usable].map(id => scenes.get(id)).filter(Boolean);
+  const cleanPool = all.filter(c => cleanliness(c).class === 'clean' && c.details?.product_visible !== false);
+  const total = sync.final_duration || sync.shots.reduce((a, x) => a + x.duration, 0);
+  // Enough clean footage = clean scenes covering the whole video at least once, and enough of them for variety.
+  const enoughClean = cleanPool.reduce((a, c) => a + c.duration, 0) >= total && cleanPool.length >= Math.min(5, sync.shots.length);
+  const pool = mode !== 'storyboard' && enoughClean ? cleanPool : all;
   const ph = phashes([...new Set([...pool.map(s => s.id), ...sync.shots.map(s => s.scene_id)])]);
   const segText = id => pp.voiceover.segments.find(s => s.id === id)?.text || '';
   const used = [], out = [], changes = [];
@@ -123,19 +146,25 @@ export function selectScenes({ sync, pp, scenes, usable, mode = 'improve', locke
       const minIdea = role === 'hook' || role === 'closing' ? 0.35 : 0.5;
       // A weak storyboard choice (packaging opening the hook does not talk about, footage with text/graphics/watermark,
       // product not visible, a closing shot that is weak or too short) may be replaced by any clean scene that fits the role.
-      const refClean = cleanliness(ref).class === 'clean';
+      const refClean = cleanliness(ref).class === 'clean' || (!enoughClean && cleanliness(ref).class === 'text');
       const weak = !refClean || ref.details?.product_visible === false
         || (role === 'hook' && [...cats(ref)].some(x => PACK.has(x)) && !mentionsBox(text))
         || (role === 'closing' && (roleFit(ref, 'closing', text) < 0.3 || ref.duration < need * 0.6));
       const roleOk = c => (role === 'hook' || role === 'closing' ? roleFit(c, role, text) >= 0.45 : sameIdea(c, ref, text) >= 0.35) && cleanliness(c).class === 'clean' && c.details?.product_visible !== false;
       const RANK = { clean: 0, text: 1, graphics: 2, review: 3 }, refRank = RANK[cleanliness(ref).class];
       // A swap never brings footage that is less clean than the storyboard's.
-      const cands = pool.filter(c => c.id === ref.id || (c.duration >= Math.min(need, 1.2) && RANK[cleanliness(c).class] <= refRank && (sameIdea(c, ref, text) >= minIdea || (weak && roleOk(c)))));
+      let cands = pool.filter(c => c.id === ref.id || (c.duration >= Math.min(need, 1.2) && RANK[cleanliness(c).class] <= refRank && (sameIdea(c, ref, text) >= minIdea || (weak && roleOk(c)))));
+      // With enough clean footage a storyboard scene with overlays is always replaced: by the same idea if possible, else by
+      // the clean scene that fits the role best (product visible, angle, quality, variety).
+      if (enoughClean && cleanliness(ref).class !== 'clean') {
+        const same = cands.filter(c => c.id !== ref.id);
+        cands = same.length ? same : cleanPool.filter(c => c.duration >= Math.min(need, 1.2));
+      }
       // Opening and closing, or a weak storyboard choice: clean footage only, as long as some fits.
       const cleanOnes = cands.filter(c => c.id !== ref.id && cleanliness(c).class === 'clean');
       if ((weak || role !== 'body') && cleanOnes.length && cleanliness(ref).class !== 'clean') cands.splice(0, cands.length, ...cands.filter(c => cleanliness(c).class === 'clean' || c.id === ref.id));
       const next = scenes.get(sync.shots[i + 1]?.scene_id); // look ahead: no look-alike right before the next shot
-      const scored = cands.map(c => { const s = sceneScore(c, { role, text, ref, used, from: -1, to: -1, ph, outShort }); if (next) { const la = lookAlike(c, next, ph) * 0.5; s.score -= la; s.parts.diversity -= la; } return { c, s }; });
+      const scored = cands.map(c => { const s = sceneScore(c, { role, text, ref, used, from: -1, to: -1, ph, outShort }); if (next) { const la = lookAlike(c, next, ph) * 1.0; s.score -= la; s.parts.diversity -= la; } return { c, s }; });
       // The approved choice wins ties; a weak one does not, and the comparison is then on the role, quality and cleanliness only.
       for (const x of scored) { if (weak) { x.s.score += 0.4 - x.s.parts.idea; x.s.parts.idea = 0.4; } else if (x.c.id === ref.id) x.s.score += 0.25; }
       scored.sort((a, b) => b.s.score - a.s.score);
@@ -144,6 +173,7 @@ export function selectScenes({ sync, pp, scenes, usable, mode = 'improve', locke
         const refS = scored.find(x => x.c.id === ref.id)?.s;
         pick = best.c;
         const r = [];
+        if (!refS && cleanliness(ref).class !== 'clean') r.push(`clean footage instead of a scene with ${cleanliness(ref).reasons.join(', ')}`);
         if (refS && best.s.parts.clean > refS.parts.clean) r.push(`cleaner footage (storyboard scene has ${refS.clean.reasons.join(', ') || 'overlays'})`);
         if (refS && best.s.parts.diversity > refS.parts.diversity + 0.2) r.push('avoids repeating a similar shot');
         if (refS && best.s.parts.role > refS.parts.role + 0.2) r.push(role === 'hook' ? 'stronger opening (product visible right away)' : role === 'closing' ? 'stronger closing product shot' : 'product more visible');
@@ -156,7 +186,7 @@ export function selectScenes({ sync, pp, scenes, usable, mode = 'improve', locke
     if (pick) used.push({ scene: pick, start: pick.start, end: pick.start + Math.min(need, pick.duration), order: i });
     out.push({ shot, scene: pick || null, original: ref?.id ?? shot.scene_id, changed: !!pick && !!ref && pick.id !== ref.id, reason: why, role, clean: pick ? cleanliness(pick) : null });
   });
-  return { shots: out, changes, ph, pool };
+  return { shots: out, changes, ph, pool, enoughClean };
 }
 
 // Extra scenes for a long shot (same idea, best first, no repeats of frames already used).

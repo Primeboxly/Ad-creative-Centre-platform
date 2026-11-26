@@ -284,3 +284,28 @@ emojis and arrows, a watermarked clip at the end). "Before" = the previous engin
 
 The real luxury watch creatives on Railway were not re-rendered from here (no access to the production server):
 open them in step 9 after this update and click **↻ Regenerate timeline**, then **Render preview**.
+
+## Final refinements before Module 7 (2026-11-26)
+
+- **Stronger repetition penalties**: reusing a scene −1.0 nearby / −0.6 further away (was −0.6 / −0.35); look-alikes
+  (duplicate/similar picture fingerprint, same action filmed again in the same video) −1.3 × similarity nearby / −0.7
+  further away (was −0.6 / −0.3); look-alike of the next storyboard shot −1.0 (was −0.5). Two neighbouring scenes of one
+  video count only 0.25 (a scene cut usually means a new shot).
+- **Clean footage only when there is enough**: if the clean scenes (no captions, promo text, emojis, stickers, graphics
+  or watermarks; product visible) cover the whole video and there are at least 5 of them (or one per shot), footage with
+  overlays is not used at all, also not as an extra angle; storyboard scenes with overlays are replaced by the same idea
+  when possible, otherwise by the clean scene that fits best, and the swap is listed. With too little clean footage the
+  previous behaviour stays (cleanest first, warning to upload clean footage).
+- **Closing**: clean product close-up or showcase first (lifestyle/people scenes score lower), stable picture, room
+  for text; the closing clip is still the last and lasts at least 2.5 s.
+- **Room for Module 7 text** in the opening and the closing: scenes with free space above/below the product score higher
+  (from the product position, or the composition notes); their crops do not zoom in and place the product slightly above
+  the middle (centre at 42 % of the height) when it still fits whole. The free room is stored on those clips
+  (`overlay_room`) and shown on the page.
+- **Exact aspect ratios**: sizes are `a×k` by `b×k` with the reduced ratio a:b and an even k: preview 9:16 540×960, 1:1
+  540×540, **4:5 544×680** (was 540×676), 16:9 960×540; production 1080×1920, 1080×1080, 1080×1350, 1920×1080.
+
+Same luxury-watch test case (20 s), previous update → now: clips with overlays 1 of 11 → **0 of 10**; closing
+lifestyle dinner shot → **clean side-view showcase on a plain background**; look-alike neighbours 0 → 0; same frames
+twice 0 → 0; shots 1.4-2.5 s → 1.5-2.5 s; 20.000 s rendered, 600/600 frames, quality check passed, cuts between words
+0/9 inside a word. Scenes are reused (different frames) because only 6 clean scenes exist for 10 clips.

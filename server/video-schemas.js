@@ -16,7 +16,11 @@ export const QUALITY = {
 export const outputSize = (aspect, quality = 'standard') => {
   const [w, h] = FORMATS[aspect] || FORMATS['9:16'];
   const s = QUALITY[quality]?.scale || 1;
-  return [Math.round((w * s) / 2) * 2, Math.round((h * s) / 2) * 2];
+  // Exact ratio AND even sizes (H.264 needs even numbers): width = a×k, height = b×k with the ratio a:b reduced and k even,
+  // as close as possible to the scaled size (4:5 preview → 544×680, not 540×676; 9:16 preview → 540×960).
+  const g = (x, y) => (y ? g(y, x % y) : x), d = g(w, h), a = w / d, b = h / d;
+  const k = Math.max(2, Math.round((w * s) / a / 2) * 2);
+  return [a * k, b * k];
 };
 // Shot length guidelines per pace (seconds): ideal and maximum before a cut is added inside a long segment.
 export const PACE = {

@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { EDL_VERSION, FORMATS, DEFAULT_FPS, PACE, LIMITS, SPEED_RANGE, TRANSITIONS, FRAMINGS, MOTIONS, EDL_SCHEMA } from './video-schemas.js';
 import { validate as checkSchema } from './schema.js';
-import { selectScenes, extrasFor, cleanliness } from './video-select.js';
+import { selectScenes, extrasFor, cleanliness, overlayRoom } from './video-select.js';
 
 const r3 = x => Math.round(x * 1000) / 1000;
 export const edlHash = edl => createHash('sha256').update(JSON.stringify({ t: edl.timeline, v: edl.tracks.video.map(({ reason, locked, source, ...c }) => c), a: edl.audio, k: [edl.tracks.voiceover?.key, edl.tracks.music?.key, edl.tracks.mix?.key] })).digest('hex');
@@ -14,7 +14,7 @@ const SAFE = { '9:16': { top: 0.1, bottom: 0.2, left: 0.06, right: 0.12 }, '4:5'
 // hand using it) stays inside; if it cannot fit, the whole frame is kept on a blurred background. Without a position,
 // conservative: a big shape change with people or a wide action keeps the whole frame, otherwise a centre crop flagged
 // for review. The team's manual framing always wins (applied later in the editor).
-export function cropFor(scene, decision, outAspect) {
+export function cropFor(scene, decision, outAspect, { keepRoom = false } = {}) {
   const [ow, oh] = FORMATS[outAspect] || FORMATS['9:16'];
   const sa = scene?.width && scene?.height ? scene.width / scene.height : ow / oh, oa = ow / oh;
   const mismatch = Math.max(sa, oa) / Math.min(sa, oa);
@@ -26,9 +26,11 @@ export function cropFor(scene, decision, outAspect) {
     if (bw <= cw + 0.001 && bh <= ch + 0.001) {
       // A small product can be shown closer (product focus), never cutting it.
       const room = Math.min(cw / bw, ch / bh);
-      const wantFocus = decision?.framing === 'product_focus' || (room > 2.2 && mismatch > 1.2);
+      // Opening and closing keep room for the Module 7 text: no close zoom, product a little above the middle.
+      const wantFocus = !keepRoom && (decision?.framing === 'product_focus' || (room > 2.2 && mismatch > 1.2));
       const zoom = wantFocus ? r3(Math.min(1.35, Math.max(1, room * 0.75))) : 1;
-      return { mode: wantFocus ? 'product_focus' : 'smart_crop', x: r3(place(cx, cw / zoom)), y: r3(place(cy, ch / zoom)), zoom, uncertain: false, basis: 'product position' };
+      const ty = keepRoom && bh <= ch * 0.84 ? cy + ch * 0.08 : cy; // product centre at 42 % of the frame height (only if it still fits whole)
+      return { mode: wantFocus ? 'product_focus' : 'smart_crop', x: r3(place(cx, cw / zoom)), y: r3(place(ty, ch / zoom)), zoom, uncertain: false, basis: keepRoom ? 'product position, room kept for text' : 'product position' };
     }
     return { mode: 'fit_background', x: 0.5, y: 0.5, zoom: 1, uncertain: false, basis: 'product wider than the crop: whole frame kept' };
   }
@@ -178,7 +180,8 @@ export function buildEdl({ edit, pkg, pp, scenes, usable, director, prev = null,
         ? (s.changed ? s.reason : pieces.length > 1 && i ? `Another part of the same scene keeps the ${pace} rhythm` : `Storyboard choice${d.reason ? `: ${d.reason}` : ''}`)
         : `Another relevant angle on the same idea (${pace} rhythm, cut between words)`;
       clips.push({ id: '', shot_id: shot.id, scene: pc.scene, segment_id: shot.segment_id, role, from: pc.from, start_frame: at, frames: fr, speed: 1,
-        crop: cropFor(pc.scene, isPrimary && !s.changed ? d : {}, aspect), motion: i === 0 && MOTIONS.includes(d.motion) ? d.motion : 'none',
+        crop: cropFor(pc.scene, isPrimary && !s.changed ? d : {}, aspect, { keepRoom: (si === 0 && i === 0) || (closing && i === pieces.length - 1) }),
+        overlay_room: (si === 0 && i === 0) || (closing && i === pieces.length - 1) ? overlayRoom(pc.scene) : undefined, motion: i === 0 && MOTIONS.includes(d.motion) ? d.motion : 'none',
         transition_in: { type: i === 0 && TRANSITIONS.includes(d.transition_in) ? d.transition_in : 'hard_cut', duration: LIMITS.transition },
         reason, source: isPrimary ? (s.changed ? 'engine' : 'storyboard') : 'engine', locked: false, storyboard_scene_id: isPrimary && s.changed ? s.original : undefined,
         closing: closing && i === pieces.length - 1 ? true : undefined, clean: cleanliness(pc.scene).class });

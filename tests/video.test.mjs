@@ -369,3 +369,39 @@ test('rhythm and duration: dynamic shots about 1.5-3 s, cuts between words, time
   const val = VP.validateVersion(VP.editRow(edit.id), bad);
   assert.ok(val.errors.some(e => e.code === 'duration_mismatch'));
 });
+
+test('final refinements: exact aspect sizes, clean-only when enough, close-up/showcase closing with room for text, look-alikes penalised', () => {
+  for (const a of Object.keys(VS.FORMATS)) for (const q of ['preview', 'standard', 'high']) {
+    const [w, h] = VS.outputSize(a, q), [rw, rh] = a.split(':').map(Number);
+    assert.equal(w * rh, h * rw, `${a} ${q}: ${w}×${h} keeps the exact ratio`);
+    assert.ok(w % 2 === 0 && h % 2 === 0);
+  }
+  assert.deepEqual(VS.outputSize('4:5', 'preview'), [544, 680]);
+  assert.deepEqual(VS.outputSize('9:16', 'preview'), [540, 960]);
+  assert.deepEqual(VS.outputSize('4:5', 'standard'), [1080, 1350]);
+  // Enough clean footage: the promo scene is never used, even where the storyboard put it.
+  const promo = mkScene(30, ['closeup', 'showcase'], { graphics: { captions: false, promo_text: true, arrows_stickers: false, other_graphics: false }, text_overlays: ['-50%'] }, { semantic: 'watch close-up with price' });
+  const clean = [31, 32, 33, 34, 35].map((id, i) => mkScene(id, [['closeup'], ['demonstration'], ['lifestyle'], ['showcase', 'closeup'], ['features']][i], i === 3 ? { composition: 'product centred on a plain background', product_box: { present: true, x: 0.3, y: 0.35, w: 0.4, h: 0.3 } } : {}, { semantic: ['dial close-up', 'clasp closes', 'woman at dinner', 'watch on a stand', 'crown detail'][i], asset_id: 100 + i }));
+  const scenes = new Map([promo, ...clean].map(s => [s.id, s]));
+  const sync = { final_duration: 10, shots: [{ id: 'a', scene_id: 31, segment_id: 's1', duration: 2 }, { id: 'b', scene_id: 30, segment_id: 's2', duration: 2 }, { id: 'c', scene_id: 32, segment_id: 's3', duration: 2 }, { id: 'd', scene_id: 33, segment_id: 's4', duration: 2 }, { id: 'e', scene_id: 33, segment_id: 's5', duration: 2 }] };
+  const pp = { voiceover: { segments: ['Look', 'See the price', 'Easy to close', 'Perfect at dinner', 'Order now'].map((text, i) => ({ id: `s${i + 1}`, text })) } };
+  const r = SEL.selectScenes({ sync, pp, scenes, usable: new Set(scenes.keys()) });
+  assert.ok(r.enoughClean);
+  assert.ok(r.shots.every(s => s.scene.id !== 30), 'promo footage not used at all');
+  assert.ok(!r.pool.some(s => s.id === 30), 'not offered as an extra either');
+  assert.equal(r.shots.at(-1).scene.id, 34, 'closing: clean showcase close-up with room, not the lifestyle shot');
+  assert.ok(SEL.overlayRoom(scenes.get(34)).bottom >= 0.2);
+  // Not enough clean footage: overlays allowed again (with the warnings), never blocking.
+  const few = new Map([promo, clean[0]].map(s => [s.id, s]));
+  const r2 = SEL.selectScenes({ sync: { final_duration: 4, shots: sync.shots.slice(0, 2) }, pp, scenes: few, usable: new Set(few.keys()) });
+  assert.equal(r2.enoughClean, false);
+  // Look-alikes (different ids, same picture) cost much more than before.
+  const a = mkScene(40, ['closeup']), b = mkScene(41, ['closeup']);
+  b.duplicate_of = 40;
+  const pen = SEL.diversityPenalty(b, -1, -1, [{ scene: a, start: 0, end: 2 }], new Map());
+  assert.ok(pen <= -1.3, `penalty ${pen}`);
+  // Opening and closing crops keep room for text: product placed above the middle, no close zoom.
+  const wide = mkScene(42, ['showcase'], { product_box: { present: true, x: 0.4, y: 0.3, w: 0.15, h: 0.3 } }, { w: 1920, h: 1080 });
+  const keep = VE.cropFor(wide, {}, '9:16', { keepRoom: true });
+  assert.equal(keep.zoom, 1); assert.match(keep.basis, /room kept/);
+});
