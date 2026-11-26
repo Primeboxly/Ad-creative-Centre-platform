@@ -34,7 +34,7 @@ export const LIMITS = {
   maxSceneUses: num('VD_MAX_SCENE_USES', 2),  // a scene appears at most this many times
   transition: num('VD_TRANSITION', 0.4),       // crossfade / dip length (s)
   frameTolerance: num('VD_FRAME_TOLERANCE', 3),
-  minFreeDiskMb: num('VD_MIN_FREE_MB', 500),
+  minFreeDiskMb: num('VD_MIN_FREE_MB', 100), // always kept free on the disk, on top of what the render itself needs
   renderTimeout: num('VD_RENDER_TIMEOUT', 1800), // seconds per job
   ffThreads: num('VD_FF_THREADS', 2),
 };

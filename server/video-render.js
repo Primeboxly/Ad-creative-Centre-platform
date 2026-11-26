@@ -114,7 +114,9 @@ export async function renderEdl({ edl, quality = 'preview', work, ctx, stage, lo
   const q = QUALITY[quality] || QUALITY.preview;
   const [W, H] = outputSize(edl.timeline.aspect_ratio, quality), fps = edl.timeline.fps;
   // Free temporary disk before starting (a full disk breaks renders in confusing ways).
-  try { const s = statfsSync(TMP_DIR); const free = (s.bavail * s.bsize) / 1048576; if (free < LIMITS.minFreeDiskMb) throw new HttpError(507, `Only ${Math.round(free)} MB of temporary disk left (need ${LIMITS.minFreeDiskMb} MB).`); } catch (e) { if (e instanceof HttpError) throw e; }
+  // Disk needed by this render (temporary clips, assembled video, final file, its stored copy and cached clips: about 5× the output size), plus a margin always kept free.
+  const needMb = Math.ceil(edl.timeline.duration * ({ preview: 0.2, standard: 0.8, high: 1.4 }[quality] || 1) * 5 + 20) + LIMITS.minFreeDiskMb;
+  try { const s = statfsSync(TMP_DIR); const free = (s.bavail * s.bsize) / 1048576; if (free < needMb) throw new HttpError(507, `Only ${Math.round(free)} MB of disk left on the server; this ${quality} render needs about ${needMb} MB. Make the Railway volume bigger (or free space), then retry.`); } catch (e) { if (e instanceof HttpError) throw e; }
   mkdirSync(work, { recursive: true });
   const v = edl.tracks.video.map(c => ({ ...c, _scene_start: scenesById.get(c.scene_id)?.start ?? 0 }));
   const tr = transitionsOf({ ...edl, tracks: { ...edl.tracks, video: v } });

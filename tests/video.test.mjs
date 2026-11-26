@@ -251,7 +251,7 @@ test('disk space guard, cancel and restart cleanup', async () => {
   VJ.enqueue(edit.id, 'render', admin, { target: 'preview' });
   let j = await wait('vd_jobs', 'edit_id', edit.id);
   VS.LIMITS.minFreeDiskMb = old;
-  assert.equal(j.status, 'failed'); assert.match(j.error, /temporary disk/);
+  assert.equal(j.status, 'failed'); assert.match(j.error, /disk left/);
   VJ.enqueue(edit.id, 'render', admin, { target: 'high' });
   await new Promise(r => setTimeout(r, 300));
   VJ.cancel(edit.id, admin);

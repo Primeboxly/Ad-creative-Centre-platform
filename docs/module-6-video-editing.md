@@ -133,8 +133,8 @@ Statuses: Draft, Queued, Validating Inputs, Preparing Editing Plan, Resolving Fo
 Audio Assets, Building Timeline, Rendering, Quality Checking, Uploading Output, Ready for Review, Approved, Failed, Cancelled.
 Progress = real stages + clip count + FFmpeg's own clock. One job per edit (a second click returns the same job), global
 limit `VD_CONCURRENCY` (1), cancel kills FFmpeg, temporary errors retried once automatically, **Retry** for failed jobs
-(prepared clips are reused from the cache), time limit `VD_RENDER_TIMEOUT` (30 min), free disk check (`VD_MIN_FREE_MB`),
-an isolated temporary folder per job deleted after success, failure or cancel, leftovers removed at start, running jobs
+(prepared clips are reused from the cache), time limit `VD_RENDER_TIMEOUT` (30 min),
+a disk check (the render's estimated need + `VD_MIN_FREE_MB`), an isolated temporary folder per job deleted after success, failure or cancel, leftovers removed at start, running jobs
 re-queued after a restart. Usage per render: wall time, output size, temporary size, clips reused, server memory.
 
 ## Database (new tables only)
@@ -158,7 +158,7 @@ for Module 7: `GET /api/creative-projects/:id/video-package?variation=N`.
 | `VD_CONCURRENCY` | 1 | Renders at the same time (keep 1 unless the server has 4+ CPUs). |
 | `VD_FF_THREADS` | 2 | CPU threads per FFmpeg command. |
 | `VD_RENDER_TIMEOUT` | 1800 | Seconds before a job is stopped. |
-| `VD_MIN_FREE_MB` | 500 | Refuse to start when less temporary disk is free. |
+| `VD_MIN_FREE_MB` | 100 | Disk always kept free, on top of what each render needs (about 5× its output size). |
 | `VD_FPS` | 30 | Output frame rate (24, 25, 30 or 60). |
 | `VD_PREVIEW_CRF`, `VD_STANDARD_CRF`, `VD_HIGH_CRF` | 28, 21, 18 | Quality (lower = better and bigger). |
 | `VD_PREVIEW_PRESET`, `VD_STANDARD_PRESET`, `VD_HIGH_PRESET` | veryfast, medium, slow | Encoding speed. |
