@@ -1,0 +1,612 @@
+{
+  "note": "Luxury-watch test creative (synthetic footage), Dynamic Pop style; only 2 of its caption groups shown.",
+  "schema_version": "1.0",
+  "vx_id": 2,
+  "project_id": 1,
+  "product_id": 1,
+  "variation_index": 1,
+  "inputs": {
+    "brief": {
+      "id": 1,
+      "version": 1
+    },
+    "script_version": {
+      "id": 1,
+      "number": 1
+    },
+    "storyboard_version": {
+      "id": 1,
+      "number": 1
+    },
+    "audio_package": {
+      "id": 1,
+      "version_id": 1,
+      "schema_version": "1.0"
+    },
+    "video": {
+      "edit_id": 1,
+      "version_id": 1,
+      "version": 1,
+      "edl_hash": "7227b82aa3012bed2635c18aa83619c96fe781157a0e3c2bee5da64a30e83f5f",
+      "approval_id": 1,
+      "edl_schema": "1.0"
+    }
+  },
+  "output": {
+    "aspect_ratio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "duration": 20,
+    "frames": 600
+  },
+  "visual_style": "Elegant and restrained, product first.",
+  "director_summary": "Test mode: Luxury, minimal intensity.",
+  "style": {
+    "id": "dynamic_pop",
+    "name": "Dynamic Pop",
+    "config": {
+      "id": "dynamic_pop",
+      "name": "Dynamic Pop",
+      "description": "Energetic condensed type, short animated groups, scale emphasis on key words.",
+      "builtin": true,
+      "font": "anton",
+      "size": 0.064,
+      "uppercase": true,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FF3B5C",
+      "highlight_mode": "color_scale",
+      "outline": {
+        "width": 0.006,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.004,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0.01
+      },
+      "line_spacing": 1,
+      "animation": {
+        "type": "bounce",
+        "duration_ms": 200
+      },
+      "position": "center",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "two",
+      "energy": "high"
+    }
+  },
+  "intensity": "dynamic",
+  "palette": {
+    "primary": "#141414",
+    "accent": "#D4AF37",
+    "secondary": "#F7F1E8"
+  },
+  "brand_kit": null,
+  "safe_zone": {
+    "preset": "instagram_reels",
+    "label": "Instagram Reels",
+    "top": 0.14,
+    "bottom": 0.35,
+    "left": 0.06,
+    "right": 0.06,
+    "source": "Meta Reels ads guidance as widely cited (14% top, 35% bottom, 6% sides; 40% bottom when a disclaimer is shown). Not confirmed on a Meta page in our 2026-11 review: check the Safe Zone overlay in Ads Manager.",
+    "verified": false
+  },
+  "caption": {
+    "enabled": true,
+    "mode": "phrase",
+    "position": "top",
+    "timing_source": "provider",
+    "timing_confidence": "high",
+    "exact_word_timing": true,
+    "note": "Word times come from the approved voice-over alignment (ElevenLabs timestamps).",
+    "groups": 8
+  },
+  "settings": {
+    "style_id": "dynamic_pop",
+    "style_overrides": {},
+    "intensity": "dynamic",
+    "segmentation": "ai",
+    "caption_position": "auto",
+    "show": {
+      "captions": null,
+      "hook": null,
+      "benefits": null,
+      "price": true,
+      "offer": null,
+      "cta": null,
+      "branding": null,
+      "effects": null
+    },
+    "brand_kit_id": null,
+    "safe_zone": "",
+    "logo_mode": "after_hook"
+  },
+  "elements": [
+    {
+      "id": "cap-0",
+      "type": "caption",
+      "track": "captions",
+      "text": "Still looking for the",
+      "lines": [
+        "Still looking",
+        "for the"
+      ],
+      "start": 0.25,
+      "end": 1.61,
+      "start_frame": 8,
+      "end_frame": 48,
+      "position": {
+        "x": 0.5,
+        "y": 0.228,
+        "preset": "top"
+      },
+      "size": {
+        "w": 0.712,
+        "h": 0.156
+      },
+      "max_width": 0.88,
+      "font": {
+        "key": "anton",
+        "family": "Anton",
+        "size": 0.064,
+        "uppercase": true,
+        "weight": "heavy"
+      },
+      "colors": {
+        "text": "#FFFFFF",
+        "highlight": "#FF3B5C",
+        "outline": "#000000"
+      },
+      "outline": {
+        "width": 0.006,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.004,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0.01
+      },
+      "animation": {
+        "type": "bounce",
+        "in_ms": 250,
+        "out_ms": 160
+      },
+      "template": "dynamic_pop",
+      "layer": 5,
+      "segment_id": "s1",
+      "clip_id": "c1",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "voiceover",
+      "purpose": "Accessibility captions synchronized with the voice-over",
+      "words": [
+        {
+          "text": "Still",
+          "start": 0.25,
+          "end": 0.56,
+          "timing": "exact"
+        },
+        {
+          "text": "looking",
+          "start": 0.62,
+          "end": 1.06,
+          "timing": "exact"
+        },
+        {
+          "text": "for",
+          "start": 1.12,
+          "end": 1.3,
+          "timing": "exact"
+        },
+        {
+          "text": "the",
+          "start": 1.37,
+          "end": 1.55,
+          "timing": "exact"
+        }
+      ],
+      "highlight_mode": "color_scale",
+      "caption_mode": "phrase",
+      "rtl": false,
+      "panel_reason": "",
+      "emphasis": "scale"
+    },
+    {
+      "id": "cap-4",
+      "type": "caption",
+      "track": "captions",
+      "text": "perfect gift?",
+      "lines": [
+        "perfect gift?"
+      ],
+      "start": 1.61,
+      "end": 2.48,
+      "start_frame": 48,
+      "end_frame": 74,
+      "position": {
+        "x": 0.5,
+        "y": 0.189,
+        "preset": "top"
+      },
+      "size": {
+        "w": 0.712,
+        "h": 0.078
+      },
+      "max_width": 0.88,
+      "font": {
+        "key": "anton",
+        "family": "Anton",
+        "size": 0.064,
+        "uppercase": true,
+        "weight": "heavy"
+      },
+      "colors": {
+        "text": "#FFFFFF",
+        "highlight": "#FF3B5C",
+        "outline": "#000000"
+      },
+      "outline": {
+        "width": 0.006,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.004,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0.01
+      },
+      "animation": {
+        "type": "bounce",
+        "in_ms": 250,
+        "out_ms": 160
+      },
+      "template": "dynamic_pop",
+      "layer": 5,
+      "segment_id": "s1",
+      "clip_id": "c1",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "voiceover",
+      "purpose": "Accessibility captions synchronized with the voice-over",
+      "words": [
+        {
+          "text": "perfect",
+          "start": 1.61,
+          "end": 2.05,
+          "timing": "exact"
+        },
+        {
+          "text": "gift?",
+          "start": 2.11,
+          "end": 2.36,
+          "hl": "benefit",
+          "timing": "exact"
+        }
+      ],
+      "highlight_mode": "color_scale",
+      "caption_mode": "phrase",
+      "rtl": false,
+      "panel_reason": "",
+      "emphasis": "scale"
+    },
+    {
+      "id": "hook-1",
+      "type": "hook",
+      "track": "hook",
+      "text": "Perfect gift?",
+      "lines": [
+        "Perfect gift?"
+      ],
+      "start": 0.2,
+      "end": 2.48,
+      "start_frame": 6,
+      "end_frame": 74,
+      "position": {
+        "x": 0.5,
+        "y": 0.5,
+        "preset": "center"
+      },
+      "size": {
+        "w": 0.601,
+        "h": 0.072
+      },
+      "max_width": 0.88,
+      "font": {
+        "key": "anton",
+        "family": "Anton",
+        "size": 0.054,
+        "uppercase": true,
+        "weight": "heavy"
+      },
+      "colors": {
+        "text": "#FFFFFF",
+        "highlight": "#D4AF37",
+        "outline": "#000000",
+        "accent": "#D4AF37"
+      },
+      "outline": {
+        "width": 0.005,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.003,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none"
+      },
+      "animation": {
+        "type": "pop",
+        "in_ms": 300,
+        "out_ms": 160
+      },
+      "template": "bold_headline",
+      "layer": 6,
+      "segment_id": "s1",
+      "clip_id": "c1",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "ai",
+      "purpose": "Opening headline supporting the spoken hook",
+      "keyword": "",
+      "accent_line": true,
+      "conflict": "product"
+    },
+    {
+      "id": "fx-gradient",
+      "type": "effect",
+      "track": "effects",
+      "text": "",
+      "lines": [],
+      "start": 0.25,
+      "end": 10.91,
+      "start_frame": 8,
+      "end_frame": 327,
+      "position": {
+        "x": 0.5,
+        "y": 0.228,
+        "preset": "top"
+      },
+      "size": {
+        "w": 1,
+        "h": 0.32
+      },
+      "max_width": 0.88,
+      "font": null,
+      "colors": {
+        "text": "#000000",
+        "accent": "#000000"
+      },
+      "outline": null,
+      "shadow": null,
+      "background": null,
+      "animation": {
+        "type": "fade",
+        "in_ms": 300,
+        "out_ms": 300
+      },
+      "template": "gradient_band",
+      "layer": 1,
+      "segment_id": "s1",
+      "clip_id": "c1",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "ai",
+      "purpose": "Soft dark gradient behind the captions (readability)"
+    },
+    {
+      "id": "price-1",
+      "type": "price",
+      "track": "promo",
+      "text": "1,200 ZMW",
+      "lines": [
+        "1,200 ZMW"
+      ],
+      "start": 7.77,
+      "end": 10.17,
+      "start_frame": 233,
+      "end_frame": 305,
+      "position": {
+        "x": 0.5,
+        "y": 0.187,
+        "preset": "top"
+      },
+      "size": {
+        "w": 0.413,
+        "h": 0.073
+      },
+      "max_width": 0.88,
+      "font": {
+        "key": "anton",
+        "family": "Anton",
+        "size": 0.06,
+        "uppercase": false,
+        "weight": "heavy"
+      },
+      "colors": {
+        "text": "#FFFFFF",
+        "highlight": "#D4AF37",
+        "outline": "#000000",
+        "accent": "#D4AF37"
+      },
+      "outline": {
+        "width": 0.003,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.003,
+        "color": "#000000",
+        "opacity": 0.5
+      },
+      "background": {
+        "mode": "none"
+      },
+      "animation": {
+        "type": "pop",
+        "in_ms": 300,
+        "out_ms": 160
+      },
+      "template": "price_reveal",
+      "layer": 7,
+      "segment_id": "s4",
+      "clip_id": "c5",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "brief",
+      "purpose": "Price from the Creative Brief"
+    },
+    {
+      "id": "cta-1",
+      "type": "cta",
+      "track": "cta",
+      "text": "Order Now",
+      "lines": [
+        "Order Now",
+        "Cash on delivery"
+      ],
+      "start": 10.17,
+      "end": 20,
+      "start_frame": 305,
+      "end_frame": 600,
+      "position": {
+        "x": 0.5,
+        "y": 0.228,
+        "preset": "top"
+      },
+      "size": {
+        "w": 0.595,
+        "h": 0.155
+      },
+      "max_width": 0.88,
+      "font": {
+        "key": "anton",
+        "family": "Anton",
+        "size": 0.044,
+        "uppercase": false,
+        "weight": "heavy"
+      },
+      "colors": {
+        "text": "#111111",
+        "highlight": "#D4AF37",
+        "outline": "#000000",
+        "accent": "#D4AF37"
+      },
+      "outline": {
+        "width": 0,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.003,
+        "color": "#000000",
+        "opacity": 0.5
+      },
+      "background": {
+        "mode": "box",
+        "color": "#D4AF37",
+        "opacity": 0.95,
+        "padding": 0.016,
+        "radius": 0.02
+      },
+      "animation": {
+        "type": "pop",
+        "in_ms": 325,
+        "out_ms": 160,
+        "pulse": true
+      },
+      "template": "cod_card",
+      "layer": 8,
+      "segment_id": "s5",
+      "clip_id": "c10",
+      "visibility": {
+        "enabled": true,
+        "rule": ""
+      },
+      "locked": false,
+      "edited": false,
+      "source": "brief",
+      "purpose": "Call to action from the approved CTA",
+      "conflict": "product"
+    }
+  ],
+  "notes": [
+    "2 of 10 clips have no measured product position: text there uses the style's default places (conservative).",
+    "No crossed-out \"before\" price: the brief has no substantiated previous price.",
+    "Overlay “This is the Luxury” skipped: no free place without covering the product."
+  ],
+  "director_warnings": [],
+  "validation": {
+    "valid": true,
+    "errors": [],
+    "warnings": [
+      {
+        "code": "product_cover",
+        "message": "hook “Perfect gift?” may cover the product at 0.2 s. Move it or lock another position.",
+        "element": "hook-1",
+        "clip": "c1"
+      },
+      {
+        "code": "product_cover",
+        "message": "caption “Watch how it catches the” may cover the product at 7.1 s. Move it or lock another position.",
+        "element": "cap-21",
+        "clip": "c5"
+      },
+      {
+        "code": "product_cover",
+        "message": "caption “light when you turn it.” may cover the product at 8.7 s. Move it or lock another position.",
+        "element": "cap-26",
+        "clip": "c6"
+      },
+      {
+        "code": "product_cover",
+        "message": "cta “Order Now” may cover the product at 17.5 s. Move it or lock another position.",
+        "element": "cta-1",
+        "clip": "c10"
+      }
+    ],
+    "checked_at": "2026-11-26T21:26:18.837Z"
+  }
+}

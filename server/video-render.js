@@ -19,9 +19,9 @@ const f3 = x => (Math.round(Number(x) * 1000) / 1000).toFixed(3);
 const clamp = (x, a, b) => Math.max(a, Math.min(b, Number(x) || 0));
 
 // ffmpeg with real progress (-progress pipe:1 → out_time). Killed on cancel (ctx.children) or timeout.
-export function run(args, ctx = null, { onTime = null, timeout = LIMITS.renderTimeout * 1000 } = {}) {
+export function run(args, ctx = null, { onTime = null, timeout = LIMITS.renderTimeout * 1000, cwd } = {}) {
   return new Promise(resolve => {
-    const p = spawn(ffmpegBin(), ['-hide_banner', '-nostdin', '-nostats', '-progress', 'pipe:1', ...args], { windowsHide: true });
+    const p = spawn(ffmpegBin(), ['-hide_banner', '-nostdin', '-nostats', '-progress', 'pipe:1', ...args], { windowsHide: true, ...(cwd ? { cwd } : {}) });
     ctx?.children?.add(p);
     let err = '', buf = '';
     const timer = setTimeout(() => { try { p.kill('SIGKILL'); } catch {} err += '\nTimed out'; }, timeout);
@@ -110,7 +110,9 @@ export function transitionsOf(edl) {
 const cacheKeyOf = (c, src, tr, W, H, fps, q) => createHash('sha256').update(JSON.stringify([src, c.source_start, c.source_end, c.speed, c.crop, c.motion, c.hold, c.frames, tr, W, H, fps, q.preset, q.clip_crf ?? q.crf, 'v1'])).digest('hex');
 
 // Render one EDL to an MP4. Returns the file path (in work) and details. stage(name, progress 0-1) reports progress.
-export async function renderEdl({ edl, quality = 'preview', work, ctx, stage, log, scenesById, projectId }) {
+// overlay (Module 7): { ass: file name in work, fontsDir: folder name in work, logo: { file, x, y, w, start, end } | null } —
+// burnt in during the one final encode (the cached clips are never re-encoded for an overlay change).
+export async function renderEdl({ edl, quality = 'preview', work, ctx, stage, log, scenesById, projectId, overlay = null }) {
   const q = QUALITY[quality] || QUALITY.preview;
   const [W, H] = outputSize(edl.timeline.aspect_ratio, quality), fps = edl.timeline.fps;
   // Free temporary disk before starting (a full disk breaks renders in confusing ways).
@@ -184,6 +186,17 @@ export async function renderEdl({ edl, quality = 'preview', work, ctx, stage, lo
   stage('building_timeline', 0.66);
   const videoOnly = join(work, 'video.mp4');
   const dur = edl.timeline.duration;
+  const post = (inLabel, logoIdx) => {
+    if (!overlay) return null;
+    let g = `[${inLabel}]ass=filename=${overlay.ass}:fontsdir=${overlay.fontsDir}[ov0]`;
+    const L = overlay.logo;
+    if (L) {
+      const lw = Math.max(16, Math.round((W * clamp(L.w, 0.02, 0.5)) / 2) * 2);
+      g += `;[${logoIdx}:v]scale=${lw}:-2,format=rgba,fade=t=in:st=${f3(L.start)}:d=0.3:alpha=1[lg];[ov0][lg]overlay=x=${Math.round(clamp(L.x, 0, 1) * W)}-w/2:y=${Math.round(clamp(L.y, 0, 1) * H)}-h/2:enable='between(t,${f3(L.start)},${f3(L.end)})',format=yuv420p[ovo]`;
+      return { graph: g, out: 'ovo' };
+    }
+    return { graph: `${g};[ov0]format=yuv420p[ovo]`, out: 'ovo' };
+  };
   if (!tr.some(t => t.xfade)) {
     writeFileSync(join(work, 'list.txt'), files.map(f => `file '${f.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
     const r = await run(['-y', '-f', 'concat', '-safe', '0', '-i', join(work, 'list.txt'), '-map', '0:v:0', '-an', '-c', 'copy', videoOnly], ctx);
@@ -199,20 +212,28 @@ export async function renderEdl({ edl, quality = 'preview', work, ctx, stage, lo
       else parts.push(`[${acc}][s${i}]concat=n=2:v=1:a=0,settb=1/${fps}[${o}]`);
       accLen += v[i].frames / fps; acc = o;
     }
-    const r = await run(['-y', ...inputs, '-filter_complex', parts.join(';'), '-map', `[${acc}]`, '-an', '-frames:v', String(edl.timeline.frames), '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf),
-      '-pix_fmt', 'yuv420p', '-threads', String(LIMITS.ffThreads), videoOnly], ctx, { onTime: t => stage('rendering', 0.7 + 0.15 * Math.min(1, t / dur)) });
+    const logoIn = overlay?.logo ? ['-loop', '1', '-i', overlay.logo.file] : [];
+    const pp = post(acc, files.length);
+    if (pp) { parts.push(pp.graph); acc = pp.out; }
+    const r = await run(['-y', ...inputs, ...logoIn, '-filter_complex', parts.join(';'), '-map', `[${acc}]`, '-an', '-frames:v', String(edl.timeline.frames), '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf),
+      '-pix_fmt', 'yuv420p', '-threads', String(LIMITS.ffThreads), videoOnly], ctx, { onTime: t => stage('rendering', 0.7 + 0.15 * Math.min(1, t / dur)), cwd: work });
     if (r.code !== 0) { if (process.env.VD_KEEP_WORK) writeFileSync(join(work, 'xfade-error.txt'), JSON.stringify({ inputs, graph: parts }, null, 1) + '\n' + r.err); throw fail(r, 'The transitions could not be rendered'); }
   }
   // 4. Final MP4: video + approved audio, exact length, web-optimised.
   stage('rendering', 0.86);
   const final = join(work, 'final.mp4');
+  const composed = overlay && !tr.some(t => t.xfade);
   const args = ['-y', '-i', videoOnly];
   if (audio) args.push('-i', audio);
-  args.push('-map', '0:v:0');
+  if (composed && overlay.logo) args.push('-loop', '1', '-i', overlay.logo.file);
+  const pc = composed ? post('0:v', audio ? 2 : 1) : null;
+  if (pc) args.push('-filter_complex', pc.graph, '-map', `[${pc.out}]`); else args.push('-map', '0:v:0');
   if (audio) args.push('-map', '1:a:0', '-af', `apad,atrim=0:${f3(dur)}`, '-c:a', 'aac', '-b:a', `${q.audio_kbps}k`, '-ar', '48000');
   else args.push('-an');
-  args.push('-c:v', 'copy', '-t', f3(dur), '-movflags', '+faststart', final);
-  const r = await run(args, ctx);
+  if (pc) args.push('-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-r', String(fps), '-frames:v', String(edl.timeline.frames), '-threads', String(LIMITS.ffThreads));
+  else args.push('-c:v', 'copy');
+  args.push('-t', f3(dur), '-movflags', '+faststart', final);
+  const r = await run(args, ctx, { cwd: work, onTime: pc ? t => stage('rendering', 0.7 + 0.15 * Math.min(1, t / dur)) : null });
   if (r.code !== 0 || !existsSync(final)) throw fail(r, 'The video could not be written');
   // 5. Thumbnail (the hook frame).
   const thumb = join(work, 'thumb.jpg');

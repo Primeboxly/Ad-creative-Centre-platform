@@ -19,6 +19,8 @@ import { mountAudio } from './audio-routes.js';
 import { startAudioWorker } from './audio-jobs.js';
 import { mountVideo } from './video-routes.js';
 import { startVideoWorker } from './video-jobs.js';
+import { mountVisual } from './vx-routes.js';
+import { startVisualWorker } from './vx-jobs.js';
 import { startSbWorker } from './sb-jobs.js';
 import { startFootageWorker, deleteProductFootage } from './footage.js';
 import { resetFromEnv } from './maintenance/reset-data.js';
@@ -438,6 +440,9 @@ mountAudio(app, { idParam });
 // ---------- AI video editing engine (Module 6) ----------
 mountVideo(app, { idParam });
 
+// ---------- AI captions & visual effects (Module 7) ----------
+mountVisual(app, { idParam });
+
 // ---------- Errors ----------
 app.use((err, req, res, next) => {
   res.set('Cache-Control', 'no-store'); // never let a browser keep an error
@@ -460,4 +465,5 @@ startFootageWorker();
 startSbWorker();
 startAudioWorker();
 startVideoWorker();
+startVisualWorker();
 app.listen(PORT, () => console.log(`Ad creative Centre on http://localhost:${PORT}`));

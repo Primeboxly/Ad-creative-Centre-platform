@@ -912,7 +912,7 @@ async function renderHub(kind) {
 }
 
 // ---------- Creative projects (Module 3): list, new project, 6-step workflow, Creative Brief ----------
-const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝'], ['audio', 'Audio studio', '🎙'], ['video', 'Video editing', '🎬']];
+const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝'], ['audio', 'Audio studio', '🎙'], ['video', 'Video editing', '🎬'], ['visual', 'Visual studio', '✨']];
 const CP_STATUS = { draft: '📝 Draft', ready: '✅ Brief saved' };
 const AIR = 'ai_recommended';
 let REG = null;
@@ -1019,7 +1019,7 @@ function drawProject(keepScroll = false) {
   const y = window.scrollY, active = document.activeElement?.id;
   const errs = st.validation.errors, warns = st.validation.warnings;
   const stepIssues = k => errs.filter(e => e.step === k).length;
-  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false, audio: false, video: false };
+  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false, audio: false, video: false, visual: false };
   v.innerHTML = `
     <a class="back" href="#projects">← Creative projects</a>
     <section class="ag-hero cp-hero">
@@ -1046,7 +1046,7 @@ function drawProject(keepScroll = false) {
     <div class="cp-nav">
       ${state.cpStep !== 'product' ? '<button class="btn" id="cpPrev">← Back</button>' : '<span></span>'}
       <span class="muted small">${errs.length ? `⛔ ${errs.length} blocking · ` : ''}${warns.length ? `⚠ ${warns.length} warning${warns.length > 1 ? 's' : ''}` : errs.length ? '' : '✓ Ready'}</span>
-      ${state.cpStep === 'video' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
+      ${state.cpStep === 'visual' ? '<span></span>' : state.cpStep === 'video' ? '<button class="btn primary big" id="cpNext">Next →</button>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
     </div>`;
   const go = async k => { await cpFlush(); state.cpStep = k; location.hash = `project/${st.project.id}/${k}`; };
   v.querySelectorAll('[data-cpstep]').forEach(b => b.onclick = () => go(b.dataset.cpstep));
@@ -1062,7 +1062,7 @@ function drawProject(keepScroll = false) {
     if (!confirm(`Delete the project "${st.project.name}" and its saved briefs? Products and footage are not touched.`)) return;
     try { await api(`/api/creative-projects/${st.project.id}`, { method: 'DELETE' }); toast('Project deleted'); location.hash = 'projects'; refreshSide(); } catch (e) { fail(e); }
   });
-  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript, audio: cpAudio, video: cpVideo })[state.cpStep]();
+  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript, audio: cpAudio, video: cpVideo, visual: cpVisual })[state.cpStep]();
   const onStep = v.querySelector('.sstep.on'); if (onStep) onStep.parentElement.scrollLeft = Math.max(0, onStep.offsetLeft - 60);
   if (!st.can_edit) $('#cpBody').querySelectorAll('input, select, textarea, button:not([data-view])').forEach(x => { x.disabled = true; });
   if (keepScroll) { window.scrollTo(0, y); if (active) { const el = document.getElementById(active); if (el && el.type !== 'checkbox') { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } } }
@@ -2162,8 +2162,8 @@ function vdDraw() {
         <div class="vd-track"><label>🎞 Video</label><div class="vd-lane">${edl.tracks.video.map(x => { const s = scene(x.scene_id); return `<button class="vd-clip ${x.id === state.vdClip ? 'on' : ''} ${x.locked ? 'locked' : ''} ${x.missing ? 'missing' : ''}" data-clip="${x.id}" style="left:${pct(x.timeline_start)};width:${pct(x.timeline_end - x.timeline_start)};${x.missing ? '' : `background-image:url(/media/scene/${x.scene_id}/thumb)`}" title="${esc(`${x.id} · ${SB_ROLES[x.role] || x.role} · scene ${x.scene_id} · ${(x.timeline_end - x.timeline_start).toFixed(2)} s · ${x.reason || ''}`)}"><span>${x.order}${x.transition_in?.type && x.transition_in.type !== 'hard_cut' ? ' ◐' : ''}${x.locked ? ' 🔒' : ''}${x.clean && x.clean !== 'clean' ? ({ text: ' 🔤', graphics: ' ✳', review: ' 💧' })[x.clean] : ''}${x.closing ? ' ★' : ''}</span></button>`; }).join('')}</div></div>
         <div class="vd-track"><label>🎙 Voice</label><div class="vd-lane audio">${wave}${(vo?.segments || []).map(sg => `<span class="vd-seg" style="left:${pct(sg.start)};width:${pct(sg.end - sg.start)}" title="${esc(seg(sg.segment_id)?.text || '')}">${esc(SB_ROLES[seg(sg.segment_id)?.role] || sg.segment_id)}</span>`).join('') || '<em class="muted small">No voice-over</em>'}</div></div>
         <div class="vd-track"><label>🎵 Music</label><div class="vd-lane audio">${edl.tracks.music ? `<span class="vd-music" style="left:0;width:100%">${esc(edl.tracks.music.name || 'Music')} · ${edl.audio.music_gain_db ? `${edl.audio.music_gain_db > 0 ? '+' : ''}${edl.audio.music_gain_db} dB` : 'approved level'}</span>` : '<em class="muted small">No music</em>'}</div></div>
-        <div class="vd-track reserved"><label>💬 Captions</label><div class="vd-lane"><em class="small muted">Module 7 (word timing ready)</em></div></div>
-        <div class="vd-track reserved"><label>✨ Effects</label><div class="vd-lane"><em class="small muted">Module 7</em></div></div>
+        <div class="vd-track reserved"><label>💬 Captions</label><div class="vd-lane"><em class="small muted">Added in step 10 (Visual studio), from the real word timing</em></div></div>
+        <div class="vd-track reserved"><label>✨ Effects</label><div class="vd-lane"><em class="small muted">Step 10 (Visual studio)</em></div></div>
         <div class="vd-head" id="vdHead" style="left:0"></div>
       </div>
       ${clip ? vdInspector(clip, v, edit) : '<p class="small muted">Select a clip to replace it, trim it, change its length, framing, motion or transition.</p>'}
@@ -2787,5 +2787,282 @@ async function openInspector(id) {
 // Back to the list after the inspector (keeps the scenes tab and filters).
 function renderFootageKeep() { if (state.tab === 'footage') renderFootage(); }
 
+
+// ---------- Step 10: AI Visual Studio (Module 7: captions & visual effects) ----------
+const VX_STATUS = { draft: 'Draft', queued: 'Queued…', preparing_strategy: 'Preparing visual strategy…', generating_captions: 'Generating captions…', generating_overlays: 'Generating overlays…',
+  preparing_effects: 'Preparing effects…', validating_plan: 'Validating visual plan…', rendering: 'Rendering…', quality_checking: 'Quality checking…', uploading: 'Uploading output…', ready: 'Ready for review', approved: 'Approved', failed: 'Failed', cancelled: 'Cancelled' };
+const VX_TYPES = { caption: '💬 Caption', hook: '🪝 Hook text', benefit: '✅ Benefit', feature: '🔎 Feature', price: '💰 Price', offer: '🏷 Offer', cta: '👉 CTA', effect: '✨ Effect', logo: '🅱 Logo' };
+const VX_LANES = [['captions', '💬 Captions', ['caption']], ['hook', '🪝 Hook', ['hook']], ['benefits', '✅ Overlays', ['benefit', 'feature']], ['promo', '💰 Price & offer', ['price', 'offer']], ['cta', '👉 CTA', ['cta']], ['effects', '✨ Effects', ['effect']], ['branding', '🅱 Brand', ['logo']]];
+const VX_SHOW = [['captions', 'Captions'], ['hook', 'Hook text'], ['benefits', 'Benefit overlays'], ['price', 'Price'], ['offer', 'Offer'], ['cta', 'CTA graphic'], ['effects', 'Effects'], ['branding', 'Logo']];
+const vxBusy = x => ['queued', 'running'].includes(x?.job?.status);
+const vxLabel = s => String(s || '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+
+async function cpVisual() {
+  const st = state.cp, body = $('#cpBody');
+  body.innerHTML = '<div class="card"><p class="muted">Loading Visual studio…</p></div>';
+  const list = await api(`/api/creative-projects/${st.project.id}/visual`).catch(fail);
+  if (!list) return;
+  state.vxList = list.edits;
+  if (!list.edits.length) {
+    body.innerHTML = `<div class="card s-empty"><div class="s-empty-ic">✨</div><h2>Approve the video edit first</h2><p class="muted">Captions and visual effects are added to the approved edit (step 9): same footage, voice-over, music and timeline.</p><button class="btn primary big" id="vxToVideo">Go to Video editing</button></div>`;
+    $('#vxToVideo').onclick = () => { location.hash = `project/${st.project.id}/video`; };
+    return;
+  }
+  if (!list.edits.some(x => x.vd_approval_id === state.vxSel)) state.vxSel = (list.edits.find(x => x.latest) || list.edits[0]).vd_approval_id;
+  const sel = list.edits.find(x => x.vd_approval_id === state.vxSel);
+  state.vx = sel.vx_id ? await api(`/api/visual-edits/${sel.vx_id}`).catch(fail) : null;
+  state.vxEl = null; state.vxRender = null;
+  vxDraw();
+}
+async function vxReload() { if (state.vx) state.vx = await api(`/api/visual-edits/${state.vx.vx.id}`); vxDraw(); }
+function vxPoll() {
+  clearTimeout(state.vxTimer);
+  const id = state.vx?.vx.id;
+  state.vxTimer = setTimeout(async () => {
+    if (state.cpStep !== 'visual' || state.vx?.vx.id !== id) return;
+    try { state.vx = await api(`/api/visual-edits/${id}`); } catch { return; }
+    if (!vxBusy(state.vx)) state.vxRender = null;
+    vxDraw();
+  }, 1500);
+}
+const vxPatch = body => sbAct(async () => { state.vx = await api(`/api/visual-edits/${state.vx.vx.id}`, { method: 'PATCH', body }); vxDraw(); });
+const vxJob = (kind, quality = '', extra = {}) => sbAct(async () => { await api(`/api/visual-edits/${state.vx.vx.id}/jobs`, { method: 'POST', body: { kind, quality, ...extra } }); await vxReload(); });
+
+function vxDraw() {
+  const y = window.scrollY;
+  const st = state.cp, x = state.vx, list = state.vxList;
+  const sel = list.find(e => e.vd_approval_id === state.vxSel);
+  const busy = vxBusy(x), edit = st.can_edit && !busy && !x?.vx.outdated;
+  const head = `
+    <section class="card sb-head">
+      <div class="sb-head-row">
+        <label>Approved video <select id="vxSel">${list.map(e => `<option value="${e.vd_approval_id}" ${e.vd_approval_id === state.vxSel ? 'selected' : ''}>Video ${e.variation_index} · edit v${e.video_version}${e.latest ? '' : ' (older)'}${e.vx_id ? ' · visuals started' : ''}</option>`).join('')}</select></label>
+        ${x ? `<span class="pst ${x.vx.status === 'approved' ? 'st-scaling' : x.vx.status === 'failed' ? 'st-paused' : 'st-idea'}">${VX_STATUS[x.vx.status] || x.vx.status}</span>` : ''}
+      </div>
+      ${x?.vx.outdated ? `<div class="cp-err">⛔ ${esc(x.vx.problems[0] || 'This creative uses older approved content.')} It is kept as it is.</div>` : !sel.latest ? '<div class="cp-warn">⚠ A newer video edit was approved for this video: choose it above.</div>' : ''}
+      ${x?.vx.plan_outdated ? `<div class="cp-warn">⚠ ${esc(x.vx.plan_outdated)}</div>` : ''}
+      ${busy ? `<div class="sb-progress"><div class="ai-orb"><span></span><span></span><span></span></div><div><b>${VX_STATUS[x.job.stage] || VX_STATUS[x.vx.status] || 'Working…'}</b>${x.job.target ? ` <span class="small muted">${esc(x.job.target)} quality</span>` : ''}<div class="fv-bar"><i style="width:${Math.max(3, Math.round((x.job.progress || 0) * 100))}%"></i></div></div><button class="btn sm" id="vxCancel">⏹ Cancel</button></div>` : ''}
+      ${x?.job?.status === 'failed' ? `<div class="cp-err">⛔ ${x.job.failed_stage ? `Stopped while ${esc((VX_STATUS[x.job.failed_stage] || x.job.failed_stage).replace('…', '').toLowerCase())}: ` : ''}${esc(x.job.error)} <a id="vxRetry">↻ Retry</a></div>` : ''}
+      <div class="sb-head-row">
+        ${!x?.plan ? `<button class="btn primary big" id="vxAuto" ${st.can_edit && !busy && sel.latest ? '' : 'disabled'}>✨ Auto Enhance Video</button><span class="small muted">One click: approved video, script and voice timing → AI visual strategy → captions on the real word timing → keyword highlights → hook text → benefit, price and CTA graphics → safe placement → checks → MP4 render → quality check.</span>`
+          : `<button class="btn primary" data-vxrender="preview" ${edit ? '' : 'disabled'}>▶ Generate preview (${x.qualities.preview.size.join('×')})</button><button class="btn" data-vxrender="standard" ${edit ? '' : 'disabled'}>Render enhanced video (${x.qualities.standard.size.join('×')})</button><button class="btn" data-vxrender="high" ${edit ? '' : 'disabled'}>Production High</button>
+            <button class="btn" data-vxregen="style" ${edit ? '' : 'disabled'} title="New AI choice of style, palette and effects (locked elements are kept)">↻ Regenerate visual style</button>
+            <select id="vxRegen" ${edit ? '' : 'disabled'}><option value="">More regeneration…</option><option value="hook">↻ Hook text</option><option value="overlays">↻ Overlays, keywords, price & offer</option><option value="cta">↻ CTA design</option><option value="all">↻ Everything (new AI plan)</option></select>`}
+        ${x ? `<span class="small muted sb-cost">${x.usage.renders} render${x.usage.renders === 1 ? '' : 's'} · ${x.usage.render_seconds} s rendering · ${x.usage.output_mb} MB · AI ${x.usage.ai_usd.toFixed(3)} (${x.usage.ai_calls} call${x.usage.ai_calls === 1 ? '' : 's'}) · no voice or music regenerated</span>` : ''}
+      </div>
+    </section>`;
+  if (!x || !x.plan) {
+    $('#cpBody').innerHTML = head + `<div class="card s-empty"><div class="s-empty-ic">✨</div><h2>No visual enhancement yet for video ${sel.variation_index}</h2><p class="muted">The AI Visual Director reads the approved brief, angle, script and real voice timing, the footage composition and the platform, then chooses caption style, highlights, hook text, overlays, price / offer / CTA graphics and effects. The renderer draws them on the approved edit: a real MP4.</p></div>`;
+    vxWire(); if (busy) vxPoll(); return;
+  }
+  const c = x.context || {}, p = x.plan, val = p.validation || { errors: [], warnings: [] }, dir = x.director || {}, L = x.library, S = x.settings;
+  const total = p.output.duration, pct = t => `${((t / total) * 100).toFixed(3)}%`;
+  const ready = x.renders.filter(r => r.status === 'ready');
+  const shown = ready.find(r => r.id === state.vxRender) || ready.find(r => r.current) || ready[0];
+  const stale = !ready.some(r => r.current);
+  const el = p.elements.find(e => e.id === state.vxEl);
+  const sty = p.style.config;
+  const showSel = k => `<select data-vxshow="${k}" ${edit ? '' : 'disabled'}><option value="" ${S.show[k] == null ? 'selected' : ''}>From the brief</option><option value="1" ${S.show[k] === true ? 'selected' : ''}>On</option><option value="0" ${S.show[k] === false ? 'selected' : ''}>Off</option></select>`;
+  const sz = p.safe_zone;
+  $('#cpBody').innerHTML = head + `
+    <section class="card"><div class="sec-h"><div><h2>📋 Creative summary</h2><small>Visual version v${x.version.number}${x.version.approved ? ' (approved)' : x.version.frozen ? ' (frozen)' : ' (draft)'}</small></div></div>
+      <div class="insp-facts">${[['Product', c.product], ['Marketing angle', (c.angles || []).join(' + ')], ['Creative type', c.creative_type], ['Language', `${c.language || ''}${c.dialect ? ` (${c.dialect})` : ''}`], ['Duration', `${total} s`],
+        ['Output', `${c.aspect} · ${c.output?.join('×')} · ${c.fps} fps`], ['Platform', c.platform], ['Approved video', `edit v${c.video_version} ✅`], ['Price', c.price || 'not in the brief'], ['Offer', c.offer || 'none'], ['CTA', c.cta || '—']].map(([k, v]) => `<div><span>${k}</span><p>${esc(v)}</p></div>`).join('')}</div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🧠 AI visual strategy</h2><small>${esc(p.visual_style || dir.visual_style || '')}</small></div></div>
+      <div class="sb-stats"><span>🎨 ${esc(p.style.name)}</span><span>⚡ ${esc(L.intensities[p.intensity] || p.intensity)} intensity</span><span>💬 ${p.caption.groups} caption groups · ${esc(vxLabel(p.caption.mode))}</span><span class="${p.caption.exact_word_timing ? 'ok' : 'bad'}">${p.caption.exact_word_timing ? '✓ real word timing' : '⚠ estimated timing'}</span><span>📱 ${esc(sz.label)} safe zone</span>
+        <span><i class="vx-sw" style="background:${esc(p.palette.primary)}"></i><i class="vx-sw" style="background:${esc(p.palette.accent)}"></i><i class="vx-sw" style="background:${esc(p.palette.secondary)}"></i> palette</span></div>
+      ${dir.style_reason ? `<p class="small muted">Style: ${esc(dir.style_reason)} · Intensity: ${esc(dir.intensity_reason || '')}</p>` : ''}
+      <p class="small muted">${esc(p.caption.note || '')}</p>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>▶ Video preview</h2><small>${shown ? `Render #${shown.id} · ${esc(shown.quality)} · ${shown.width}×${shown.height} · ${shown.duration.toFixed(2)} s · ${shown.fps} fps · ${vdMB(shown.size)} · made in ${shown.render_seconds.toFixed(1)} s · visual v${shown.version_number}` : 'Not rendered yet'}</small></div>
+      ${shown ? `<div class="row"><label class="small"><input type="checkbox" id="vxGuides" ${state.vxGuides !== false ? 'checked' : ''}> Safe-zone guides</label><button class="btn sm" id="vxFull">⛶ Full screen</button><a class="btn sm" href="/api/visual-renders/${shown.id}/video?download=1">⬇ Download</a></div>` : ''}</div>
+      ${stale && ready.length ? '<div class="cp-warn">⚠ The visual plan changed since the last render. <a data-vxrender="preview">Generate the updated preview</a></div>' : ''}
+      ${shown ? `<div class="vd-player ${c.aspect === '16:9' ? 'wide' : ''}"><div class="vx-stage"><video id="vxVideo" controls preload="metadata" playsinline src="/api/visual-renders/${shown.id}/video" poster="${shown.thumb_key ? `/api/visual-renders/${shown.id}/thumb` : ''}"></video>
+          ${state.vxGuides !== false ? `<div class="vx-guide" title="${esc(sz.source)}" style="top:${sz.top * 100}%;bottom:${sz.bottom * 100}%;left:${sz.left * 100}%;right:${sz.right * 100}%"><span>${esc(sz.label)} safe zone${sz.verified ? '' : ' (guide)'}</span></div>` : ''}</div>
+        <div class="vd-qc"><h4>Quality check (measured on the MP4)</h4>${shown.qc ? `${shown.qc.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('')}${shown.qc.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}</div>`).join('')}${!shown.qc.errors.length && !shown.qc.warnings.length ? '<div class="cp-ok">✓ Plays, exact size, frame rate and length, full voice-over, no footage sound; every caption and overlay appears on time, inside the frame and the safe zone; all letters found in the fonts.</div>' : ''}
+          ${shown.qc.measured?.visual ? `<p class="small muted">${shown.qc.measured.visual.elements_checked || 0} text elements checked on ${shown.qc.measured.visual.frames || 0} frames · fonts: ${esc((shown.qc.measured.visual.fonts || []).join(', '))}</p>` : ''}` : ''}
+          <p class="small muted">The safe-zone guide is only shown here, never in the video.</p>
+          <h4>Renders</h4><div class="vd-renders">${x.renders.slice(0, 8).map(r => `<button class="vd-r ${shown?.id === r.id ? 'on' : ''}" data-vxshowr="${r.id}" ${r.status === 'ready' ? '' : 'disabled'}><b>#${r.id}</b> ${esc(r.quality)} · v${r.version_number}${r.current ? '' : ' · older'} · <i>${esc(r.status)}</i></button>`).join('')}</div></div></div>`
+        : '<p class="muted">Click “Generate preview”.</p>'}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎚 Visual timeline</h2><small>${total} s · click an element to edit it · the video, voice-over and music are not changed here</small></div>
+      <div class="row">${VX_LANES.map(([k, l]) => `<label class="small"><input type="checkbox" data-vxlane="${k}" ${(state.vxHide || {})[k] ? '' : 'checked'}> ${l}</label>`).join('')}</div></div>
+      <div class="vd-tl" id="vxTl">
+        <div class="vd-ruler">${Array.from({ length: Math.floor(total) + 1 }, (_, s) => (s % (total > 30 ? 5 : 2) === 0 ? `<span style="left:${pct(s)}">${s}s</span>` : '')).join('')}</div>
+        <div class="vd-track"><label>🎞 Video</label><div class="vd-lane audio">${(c.clips || []).map(k => `<span class="vd-seg" style="left:${pct(k.start)};width:${pct(k.end - k.start)};background-image:url(/media/scene/${k.scene_id}/thumb);background-size:cover" title="Clip ${k.order}${k.clean !== 'clean' ? ' · source has text/graphics' : ''}">${k.order}${k.clean !== 'clean' ? ' 🔤' : ''}</span>`).join('')}</div></div>
+        ${VX_LANES.filter(([k]) => !(state.vxHide || {})[k]).map(([k, l, types]) => `<div class="vd-track"><label>${l}</label><div class="vd-lane vx-lane">${p.elements.filter(e => types.includes(e.type)).map(e => `<button class="vx-el t-${e.type} ${e.id === state.vxEl ? 'on' : ''} ${e.visibility?.enabled === false ? 'off' : ''}" data-vxel="${esc(e.id)}" style="left:${pct(e.start)};width:${pct(Math.max(0.15, e.end - e.start))}" title="${esc(`${VX_TYPES[e.type]} · ${e.start}–${e.end} s · ${e.text || e.template}${e.purpose ? ` · ${e.purpose}` : ''}`)}">${e.locked ? '🔒' : ''}${e.edited ? '✎' : ''}${esc(e.text || vxLabel(e.template))}</button>`).join('') || '<em class="muted small" style="padding-left:6px">—</em>'}</div></div>`).join('')}
+        <div class="vd-head" id="vxHead" style="left:0"></div>
+      </div>
+      ${el ? vxInspector(el, x, edit) : '<p class="small muted">Select an element to edit its text, timing, position, template, colours, or to hide or lock it.</p>'}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>💬 Caption studio</h2><small>${x.settings.style_id ? 'Chosen by the team' : `AI recommended: ${esc(p.style.name)}`} · changing the style re-uses the voice timing (no AI, no ElevenLabs)</small></div></div>
+      <div class="vx-styles">${L.styles.map(s => `<button class="vx-style ${p.style.id === s.id ? 'on' : ''}" data-vxstyle="${esc(s.id)}" ${edit ? '' : 'disabled'}><b style="font-family:${s.font?.startsWith('playfair') ? 'Georgia,serif' : 'inherit'};${s.uppercase ? 'text-transform:uppercase;' : ''}color:${esc(s.text_color)};background:${s.background?.mode === 'box' ? esc(s.background.color) : '#20232b'}">Aa <i style="color:${esc(s.highlight_color)}">key</i></b><span>${esc(s.name)}${dir.style_id === s.id ? ' · AI pick' : ''}</span><small>${esc(s.description || (s.builtin === false ? 'Team preset' : ''))}</small></button>`).join('')}
+        <button class="vx-style" data-vxstyle="" ${edit ? '' : 'disabled'}><b style="background:#20232b;color:#fff">🧠</b><span>AI recommended</span><small>Let the Visual Director choose</small></button></div>
+      <div class="au-trim vx-form">
+        <label>Font <select id="vxFont" ${edit ? '' : 'disabled'}>${L.fonts.map(f => `<option value="${f.key}" ${sty.font === f.key ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}</select></label>
+        <label>Size <input type="range" id="vxSize" min="0.03" max="0.08" step="0.002" value="${sty.size}" ${edit ? '' : 'disabled'}></label>
+        <label>Text <input type="color" id="vxText" value="${esc(sty.text_color)}" ${edit ? '' : 'disabled'}></label>
+        <label>Highlight <input type="color" id="vxHl" value="${esc(sty.highlight_color)}" ${edit ? '' : 'disabled'}></label>
+        <label>Outline <input type="range" id="vxOutline" min="0" max="0.01" step="0.0005" value="${sty.outline.width}" ${edit ? '' : 'disabled'}></label>
+        <label>Shadow <input type="range" id="vxShadow" min="0" max="0.008" step="0.0005" value="${sty.shadow.depth}" ${edit ? '' : 'disabled'}></label>
+        <label>Background <select id="vxBg" ${edit ? '' : 'disabled'}><option value="none" ${sty.background.mode === 'none' ? 'selected' : ''}>None</option><option value="box" ${sty.background.mode === 'box' ? 'selected' : ''}>Panel</option></select></label>
+        <label>Animation <select id="vxAnim" ${edit ? '' : 'disabled'}>${L.animations.map(a => `<option value="${a}" ${sty.animation.type === a ? 'selected' : ''}>${vxLabel(a)}</option>`).join('')}</select></label>
+        <label>Position <select id="vxPos" ${edit ? '' : 'disabled'}><option value="auto">Automatic</option>${L.positions.map(o => `<option value="${o}" ${S.caption_position === o ? 'selected' : ''}>${vxLabel(o)}</option>`).join('')}</select></label>
+        <label>Grouping <select id="vxSeg" ${edit ? '' : 'disabled'}>${L.segmentations.map(o => `<option value="${o}" ${S.segmentation === o ? 'selected' : ''}>${{ word: 'Word by word', two: 'Two words', three: 'Three words', phrase: 'Short phrases (2-5)', sentence: 'Sentences', ai: 'AI recommended' }[o]}</option>`).join('')}</select></label>
+        <button class="btn sm" id="vxStyleSave" ${edit ? '' : 'disabled'}>Apply caption settings</button><button class="btn sm" id="vxStyleReset" ${edit ? '' : 'disabled'}>Reset to the style</button><button class="btn sm" id="vxPreset" ${edit ? '' : 'disabled'}>💾 Save as preset</button>
+      </div>
+      <div class="vx-cap-prev" style="--tx:${esc(sty.text_color)};--hl:${esc(sty.highlight_color)}"><span style="${sty.uppercase ? 'text-transform:uppercase;' : ''}${sty.background.mode === 'box' ? `background:${esc(sty.background.color)};padding:4px 10px;border-radius:6px;` : ''}font-family:${sty.font.startsWith('playfair') ? 'Georgia,serif' : 'inherit'}">${(p.elements.find(e => e.type === 'caption')?.words || [{ text: 'Your' }, { text: 'caption', hl: 1 }, { text: 'here' }]).map(w => w.hl ? `<i>${esc(w.text)}</i>` : esc(w.text)).join(' ')}</span></div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🧩 Visual overlays, effects & branding</h2><small>Each layer follows the brief unless you switch it here. Prices and offers come only from the brief.</small></div></div>
+      <div class="au-trim vx-form">
+        ${VX_SHOW.map(([k, l]) => `<label>${l} ${showSel(k)}</label>`).join('')}
+        <label>Effects intensity <select id="vxInt" ${edit ? '' : 'disabled'}><option value="ai" ${S.intensity === 'ai' ? 'selected' : ''}>AI recommended (${esc(L.intensities[dir.intensity] || '')})</option>${Object.entries(L.intensities).map(([k, l]) => `<option value="${k}" ${S.intensity === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label>Brand kit <select id="vxKit" ${edit ? '' : 'disabled'}><option value="">None</option>${L.brand_kits.map(k => `<option value="${k.id}" ${S.brand_kit_id === k.id ? 'selected' : ''}>${esc(k.name)}${k.logo_key ? ' (logo)' : ''}</option>`).join('')}</select></label>
+        <label>Logo <select id="vxLogo" ${edit ? '' : 'disabled'}><option value="after_hook" ${S.logo_mode === 'after_hook' ? 'selected' : ''}>After the hook</option><option value="closing" ${S.logo_mode === 'closing' ? 'selected' : ''}>Closing only</option><option value="hidden" ${S.logo_mode === 'hidden' ? 'selected' : ''}>Hidden</option></select></label>
+        <label>Safe zone <select id="vxZone" ${edit ? '' : 'disabled'}><option value="">Automatic (${esc(sz.label)})</option>${Object.entries(L.safe_zones).map(([k, z]) => `<option value="${k}" ${S.safe_zone === k ? 'selected' : ''}>${esc(z.label)}</option>`).join('')}</select></label>
+      </div>
+      <div class="sb-stats">${Object.entries(L.effects).map(([k, l]) => `<span class="${p.elements.some(e => e.template === k) || (k === 'cta_pulse' && p.elements.some(e => e.animation?.pulse)) || (k === 'accent_line' && p.elements.some(e => e.accent_line)) || (['highlight_pulse', 'keyword_scale'].includes(k) && p.elements.some(e => e.emphasis)) || (k === 'card_reveal' && p.elements.some(e => e.type === 'benefit' && e.animation?.type === 'slide_in')) || (k === 'banner_slide' && p.elements.some(e => e.type === 'offer' && e.animation?.type === 'slide_in')) ? 'ok' : 'muted'}">${esc(l)}</span>`).join('')}</div>
+      <details class="au-more"><summary>🅱 Brand kits</summary>
+        <div class="vx-kits">${L.brand_kits.map(k => `<div class="vx-kit">${k.logo_url ? `<img src="${k.logo_url}" alt="">` : '<span class="muted small">no logo</span>'}<b>${esc(k.name)}</b><span>${[k.primary_color, k.secondary_color, k.accent_color].filter(Boolean).map(cl => `<i class="vx-sw" style="background:${esc(cl)}"></i>`).join('')}</span><label class="btn sm">Logo…<input type="file" accept="image/png,image/jpeg,image/webp" data-vxlogo="${k.id}" hidden></label></div>`).join('') || '<p class="small muted">No brand kit yet. Branding is optional.</p>'}</div>
+        <div class="au-trim vx-form"><label>Name <input id="vxKName" placeholder="My brand"></label><label>Primary <input type="color" id="vxKP" value="#111111"></label><label>Secondary <input type="color" id="vxKS" value="#ffffff"></label><label>Accent <input type="color" id="vxKA" value="#ff6b35"></label>
+          <label>Logo place <select id="vxKPos"><option value="top_right">Top right</option><option value="top_left">Top left</option><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option></select></label><button class="btn sm" id="vxKSave">+ Create brand kit</button></div>
+      </details>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🔎 Checks</h2><small>${val.errors.length ? `${val.errors.length} blocking` : 'Nothing blocking'} · ${val.warnings.length} warning${val.warnings.length === 1 ? '' : 's'} (placement, safe zone, contrast, clutter)</small></div><button class="btn sm" id="vxCheck">Check again</button></div>
+      ${val.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('')}${val.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}${w.element ? ` <a data-vxgo="${esc(w.element)}">Show</a>` : ''}</div>`).join('')}${(p.director_warnings || []).map(w => `<div class="cp-warn">🧠 ${esc(w)}</div>`).join('')}
+      ${(p.notes || []).map(n => `<p class="small muted">ℹ ${esc(n)}</p>`).join('')}
+      ${!val.errors.length && !val.warnings.length ? '<div class="cp-ok">✓ Everything checks out.</div>' : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🗂 Versions</h2><small>Approved versions never change; an edit after approval makes a new draft.</small></div>
+      <div class="row"><button class="btn sm" id="vxSaveV" ${edit ? '' : 'disabled'}>💾 Save version</button>${x.versions.length > 1 ? '<button class="btn sm" id="vxCmp">⇄ Compare</button>' : ''}<button class="btn sm" id="vxPlan">{ } Visual plan</button>${x.package ? '<button class="btn sm" id="vxPkg">{ } Package for Module 8</button>' : ''}</div></div>
+      <div class="au-vers">${x.versions.map(v => `<div class="au-ver ${v.id === x.version.id ? 'on' : ''}"><b>v${v.number}</b><span>${esc(v.label || '')}${v.approved ? ' ✅' : v.frozen ? ' 🧊' : ''}</span><span class="small muted">${ago(v.updated_at || v.created_at)}</span>${v.id !== x.version.id ? `<button class="btn sm" data-vxrestore="${v.id}" ${edit ? '' : 'disabled'}>Restore</button>` : '<b class="ok-t">Current</b>'}</div>`).join('')}</div>
+    </section>
+
+    <div class="card au-approve"><span class="small muted">${x.version.approved ? `Approved ${ago(x.package?.approved_at)}: ready for Module 8 (preview, editing & export).` : 'Approve a production render of the current visual plan.'}</span>
+      <div class="row">${(() => { const ok = ready.filter(r => r.current && r.quality !== 'preview' && r.qc_ok); return ok.length && !x.version.approved ? `<select id="vxApproveR">${ok.map(r => `<option value="${r.id}">#${r.id} · ${r.quality} · ${r.width}×${r.height}</option>`).join('')}</select>` : ''; })()}
+      <button class="btn primary big" id="vxApprove" ${edit && !val.errors.length && !x.version.approved && ready.some(r => r.current && r.quality !== 'preview' && r.qc_ok) ? '' : 'disabled'}>${x.version.approved ? '✅ Approved' : '✅ Approve Visual Enhancements'}</button></div></div>`;
+  vxWire();
+  if (busy) vxPoll();
+  window.scrollTo(0, y);
+}
+
+function vxInspector(e, x, edit) {
+  const L = x.library, lists = { hook: L.hook_templates, benefit: L.benefit_templates, feature: L.benefit_templates, price: L.price_templates, offer: L.price_templates, cta: L.cta_templates }[e.type];
+  const dis = edit && !e.locked ? '' : 'disabled';
+  return `<div class="vd-insp"><div class="sec-h"><div><h3>${VX_TYPES[e.type] || e.type} · ${e.start}–${e.end} s</h3><small>${esc(e.purpose || '')}${e.source ? ` · source: ${esc(e.source)}` : ''}${e.correction ? ' · corrected caption (timing kept from the voice-over)' : ''}</small></div>
+    <label class="small"><input type="checkbox" id="vxLock" ${e.locked ? 'checked' : ''} ${edit ? '' : 'disabled'}> 🔒 Lock (kept by every regeneration)</label></div>
+    <div class="au-trim vx-form">
+      ${e.type !== 'effect' && e.type !== 'logo' ? `<label class="grow">Text <input id="vxElText" value="${esc(e.text)}" maxlength="120" ${dis}></label>` : ''}
+      ${e.type !== 'caption' ? `<label>Start (s) <input type="number" id="vxElStart" step="0.05" min="0" max="${x.plan.output.duration}" value="${e.start}" ${dis}></label><label>End (s) <input type="number" id="vxElEnd" step="0.05" min="0" max="${x.plan.output.duration}" value="${e.end}" ${dis}></label>` : '<span class="small muted">Caption times follow the real voice-over.</span>'}
+      <label>Position <select id="vxElPos" ${dis}><option value="">${esc(vxLabel(e.position?.preset || 'custom'))} (current)</option>${L.positions.map(o => `<option value="${o}">${vxLabel(o)}</option>`).join('')}</select></label>
+      <label>X <input type="number" id="vxElX" step="0.01" min="0" max="1" value="${e.position?.x}" ${dis}></label><label>Y <input type="number" id="vxElY" step="0.01" min="0" max="1" value="${e.position?.y}" ${dis}></label>
+      ${lists ? `<label>Template <select id="vxElTpl" ${dis}>${Object.entries(lists).map(([k, l]) => `<option value="${k}" ${e.template === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` : ''}
+      ${e.font ? `<label>Size <input type="number" id="vxElSize" step="0.002" min="0.028" max="0.11" value="${e.font.size}" ${dis}></label>` : ''}
+      ${e.colors?.text ? `<label>Text colour <input type="color" id="vxElCol" value="${esc(e.colors.text)}" ${dis}></label>` : ''}
+      ${e.type !== 'effect' && e.type !== 'logo' ? `<label>Animation <select id="vxElAnim" ${dis}>${L.animations.map(a => `<option value="${a}" ${e.animation?.type === a ? 'selected' : ''}>${vxLabel(a)}</option>`).join('')}</select></label>` : ''}
+      <button class="btn sm primary" id="vxElSave" ${dis}>Apply</button>
+      <button class="btn sm" id="vxElToggle" ${dis}>${e.visibility?.enabled === false ? '👁 Show' : '🙈 Hide / remove'}</button>
+    </div></div>`;
+}
+
+function vxWire() {
+  const st = state.cp, x = state.vx;
+  $('#vxSel')?.addEventListener('change', e => { state.vxSel = Number(e.target.value); cpVisual(); });
+  $('#vxAuto')?.addEventListener('click', () => sbAct(async () => {
+    const r = await api(`/api/creative-projects/${st.project.id}/visual/auto`, { method: 'POST', body: { vd_approval_id: state.vxSel } });
+    state.vx = await api(`/api/visual-edits/${r.vx_id}`); vxDraw();
+  }));
+  $('#vxCancel')?.addEventListener('click', () => sbAct(async () => { await api(`/api/visual-edits/${x.vx.id}/cancel`, { method: 'POST' }); toast('Stopping…'); }));
+  $('#vxRetry')?.addEventListener('click', () => sbAct(async () => { await api(`/api/visual-edits/${x.vx.id}/retry`, { method: 'POST' }); await vxReload(); }));
+  if (!x?.plan) return;
+  const id = x.vx.id, p = x.plan;
+  document.querySelectorAll('[data-vxrender]').forEach(b => b.onclick = () => vxJob('render', b.dataset.vxrender));
+  document.querySelectorAll('[data-vxregen]').forEach(b => b.onclick = () => { if (confirm('Ask the AI Visual Director for a new style, palette and effects? Locked and edited elements are kept; script, voice-over, music and footage do not change.')) vxJob('auto', 'preview', { parts: [b.dataset.vxregen] }); });
+  $('#vxRegen')?.addEventListener('change', e => { const v = e.target.value; e.target.value = ''; if (v && confirm(`Regenerate ${v === 'all' ? 'the whole visual plan' : v} with the AI? Locked elements are kept.`)) vxJob('auto', 'preview', { parts: [v] }); });
+  document.querySelectorAll('[data-vxshowr]').forEach(b => b.onclick = () => { state.vxRender = Number(b.dataset.vxshowr); vxDraw(); });
+  document.querySelectorAll('[data-vxel]').forEach(b => b.onclick = e => { e.stopPropagation(); state.vxEl = state.vxEl === b.dataset.vxel ? null : b.dataset.vxel; vxDraw(); });
+  document.querySelectorAll('[data-vxgo]').forEach(b => b.onclick = () => { state.vxEl = b.dataset.vxgo; vxDraw(); $('#vxTl')?.scrollIntoView({ block: 'center' }); });
+  document.querySelectorAll('[data-vxlane]').forEach(b => b.onchange = () => { state.vxHide = { ...(state.vxHide || {}), [b.dataset.vxlane]: !b.checked }; vxDraw(); });
+  $('#vxGuides')?.addEventListener('change', e => { state.vxGuides = e.target.checked; vxDraw(); });
+  $('#vxFull')?.addEventListener('click', () => $('#vxVideo')?.requestFullscreen?.());
+  const vid = $('#vxVideo'), tl = $('#vxTl'), head = $('#vxHead'), total = p.output.duration;
+  if (vid && head) vid.ontimeupdate = () => { head.style.left = `calc(90px + (100% - 90px) * ${Math.min(1, vid.currentTime / total)})`; };
+  tl?.querySelectorAll('.vd-lane').forEach(l => l.onclick = e => { if (!vid || e.target.closest('[data-vxel]')) return; const r = l.getBoundingClientRect(); vid.currentTime = Math.max(0, Math.min(total, ((e.clientX - r.left) / r.width) * total)); });
+  // Caption studio
+  document.querySelectorAll('[data-vxstyle]').forEach(b => b.onclick = () => vxPatch({ settings: { style_id: b.dataset.vxstyle } }));
+  $('#vxStyleSave')?.addEventListener('click', () => {
+    const o = { font: $('#vxFont').value, size: Number($('#vxSize').value), text_color: $('#vxText').value.toUpperCase(), highlight_color: $('#vxHl').value.toUpperCase(),
+      outline: { ...p.style.config.outline, width: Number($('#vxOutline').value) }, shadow: { ...p.style.config.shadow, depth: Number($('#vxShadow').value) },
+      background: { ...p.style.config.background, mode: $('#vxBg').value, opacity: $('#vxBg').value === 'box' ? Math.max(0.5, p.style.config.background.opacity || 0) : 0 }, animation: { ...p.style.config.animation, type: $('#vxAnim').value } };
+    vxPatch({ settings: { style_overrides: o, caption_position: $('#vxPos').value, segmentation: $('#vxSeg').value } });
+  });
+  $('#vxStyleReset')?.addEventListener('click', () => vxPatch({ settings: { style_id: x.settings.style_id || p.style.id, style_overrides: {} } }));
+  $('#vxPreset')?.addEventListener('click', () => sbAct(async () => {
+    const name = prompt('Name of the caption preset (reusable in every project):'); if (!name) return;
+    const cfg = p.style.config;
+    const r = await api('/api/caption-styles', { method: 'POST', body: { name, base: CAPTION_BASES.includes(p.style.id) ? p.style.id : 'modern_bold', config: Object.fromEntries(['font', 'size', 'uppercase', 'text_color', 'highlight_color', 'highlight_mode', 'outline', 'shadow', 'background', 'line_spacing', 'animation', 'position', 'max_lines', 'segmentation'].map(k => [k, cfg[k]])) } });
+    toast(`Preset “${r.name}” saved`); await vxReload();
+  }));
+  // Overlays, effects, branding
+  document.querySelectorAll('[data-vxshow]').forEach(s => s.onchange = () => vxPatch({ settings: { show: { [s.dataset.vxshow]: s.value === '' ? null : s.value === '1' } } }));
+  $('#vxInt')?.addEventListener('change', e => vxPatch({ settings: { intensity: e.target.value } }));
+  $('#vxKit')?.addEventListener('change', e => vxPatch({ settings: { brand_kit_id: e.target.value ? Number(e.target.value) : null } }));
+  $('#vxLogo')?.addEventListener('change', e => vxPatch({ settings: { logo_mode: e.target.value } }));
+  $('#vxZone')?.addEventListener('change', e => vxPatch({ settings: { safe_zone: e.target.value } }));
+  $('#vxKSave')?.addEventListener('click', () => sbAct(async () => {
+    await api('/api/brand-kits', { method: 'POST', body: { name: $('#vxKName').value, primary_color: $('#vxKP').value.toUpperCase(), secondary_color: $('#vxKS').value.toUpperCase(), accent_color: $('#vxKA').value.toUpperCase(), logo_position: $('#vxKPos').value } });
+    toast('Brand kit created'); await vxReload();
+  }));
+  document.querySelectorAll('[data-vxlogo]').forEach(inp => inp.onchange = () => sbAct(async () => {
+    const f = inp.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    const r = await fetch(`/api/brand-kits/${inp.dataset.vxlogo}/logo`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed');
+    toast('Logo saved'); await vxReload();
+  }));
+  // Element inspector
+  const el = p.elements.find(e => e.id === state.vxEl);
+  if (el) {
+    $('#vxLock')?.addEventListener('change', e => vxPatch({ element: { id: el.id, locked: e.target.checked } }));
+    $('#vxElToggle')?.addEventListener('click', () => vxPatch({ element: { id: el.id, enabled: el.visibility?.enabled === false } }));
+    $('#vxElSave')?.addEventListener('click', () => {
+      const b = { id: el.id };
+      const t = $('#vxElText')?.value; if (t !== undefined && t !== el.text) b.text = t;
+      const s0 = $('#vxElStart')?.value, s1 = $('#vxElEnd')?.value;
+      if (s0 !== undefined && (Number(s0) !== el.start || Number(s1) !== el.end)) { b.start = Number(s0); b.end = Number(s1); }
+      const pos = $('#vxElPos')?.value, px = Number($('#vxElX')?.value), py = Number($('#vxElY')?.value);
+      if (pos) b.position = { preset: pos }; else if (px !== el.position?.x || py !== el.position?.y) b.position = { x: px, y: py };
+      const tpl = $('#vxElTpl')?.value; if (tpl && tpl !== el.template) b.template = tpl;
+      const sz = $('#vxElSize')?.value; if (sz && Number(sz) !== el.font?.size) b.font_size = Number(sz);
+      const col = $('#vxElCol')?.value; if (col && col.toUpperCase() !== String(el.colors?.text).toUpperCase()) b.colors = { text: col.toUpperCase() };
+      const an = $('#vxElAnim')?.value; if (an && an !== el.animation?.type) b.animation = an;
+      if (Object.keys(b).length > 1) vxPatch({ element: b }); else toast('Nothing changed');
+    });
+  }
+  // Checks, versions, approval
+  $('#vxCheck')?.addEventListener('click', () => sbAct(async () => { state.vx = await api(`/api/visual-edits/${id}/validate`, { method: 'POST' }); vxDraw(); }));
+  $('#vxSaveV')?.addEventListener('click', () => sbAct(async () => { const label = prompt('Name this version (optional):', '') ?? ''; state.vx = await api(`/api/visual-edits/${id}/versions`, { method: 'POST', body: { label } }); vxDraw(); toast('Version saved'); }));
+  document.querySelectorAll('[data-vxrestore]').forEach(b => b.onclick = () => sbAct(async () => { state.vx = await api(`/api/visual-edits/${id}/versions/${b.dataset.vxrestore}/restore`, { method: 'POST' }); vxDraw(); toast('Version restored as a new draft'); }));
+  $('#vxCmp')?.addEventListener('click', () => sbAct(async () => {
+    const v = x.versions; const a = v[1], b = v[0];
+    const d = await api(`/api/visual-edits/${id}/compare?a=${a.id}&b=${b.id}`);
+    sbJson(`Visual v${d.a} → v${d.b}: ${d.style[0]} → ${d.style[1]}, ${d.intensity[0]} → ${d.intensity[1]}`, d);
+  }));
+  $('#vxPlan')?.addEventListener('click', () => sbAct(async () => sbJson(`Visual Enhancement Plan v${x.schema_version}`, await api(`/api/visual-edits/${id}/plan`))));
+  $('#vxPkg')?.addEventListener('click', () => sbAct(async () => { const r = await api(`/api/visual-edits/${id}/package`); sbJson(`Enhanced creative package v${r.package.schema_version} (for Module 8)`, r.package); }));
+  $('#vxApprove')?.addEventListener('click', () => sbAct(async () => {
+    try { state.vx = await api(`/api/visual-edits/${id}/approve`, { method: 'POST', body: { render_id: Number($('#vxApproveR')?.value) } }); vxDraw(); toast('Visual enhancements approved: ready for Module 8'); }
+    catch (e) { fail(e); }
+  }));
+}
+const CAPTION_BASES = ['hormozi', 'modern_bold', 'karaoke', 'minimal', 'luxury', 'dynamic_pop', 'social_ugc'];
 
 start().catch(() => {});

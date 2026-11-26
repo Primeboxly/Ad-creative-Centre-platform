@@ -1,0 +1,987 @@
+{
+  "visual_enhancement_plan": {
+    "schema_version": "1.0",
+    "plan": {
+      "required": [
+        "schema_version",
+        "vx_id",
+        "project_id",
+        "variation_index",
+        "inputs",
+        "output",
+        "style",
+        "intensity",
+        "palette",
+        "brand_kit",
+        "safe_zone",
+        "caption",
+        "settings",
+        "elements",
+        "validation"
+      ],
+      "inputs": "brief {id, version}, script_version, storyboard_version, audio_package {id, version_id}, video {edit_id, version_id, edl_hash, approval_id}",
+      "output": "{aspect_ratio, width, height, fps, duration (s), frames}"
+    },
+    "element": {
+      "id": "unique id",
+      "type": [
+        "caption",
+        "hook",
+        "benefit",
+        "feature",
+        "price",
+        "offer",
+        "cta",
+        "effect",
+        "logo"
+      ],
+      "track": [
+        "captions",
+        "hook",
+        "features",
+        "benefits",
+        "promo",
+        "cta",
+        "effects",
+        "branding"
+      ],
+      "text": "string",
+      "lines": "string[]",
+      "words": "caption words [{text, start, end, hl?, timing}]",
+      "start": "s (ms precision)",
+      "end": "s",
+      "start_frame": "int",
+      "end_frame": "int",
+      "position": "{x, y} centre, fractions of the frame + preset",
+      "size": "{w, h} estimated fractions",
+      "max_width": "fraction",
+      "font": "{key, family, size (fraction of height), uppercase, weight}",
+      "colors": "{text, highlight, outline, accent}",
+      "outline": "{width, color}",
+      "shadow": "{depth, color, opacity}",
+      "background": "{mode none|box, color, opacity, padding}",
+      "animation": "{type static|fade|slide_up|slide_in|pop|bounce|scale_emphasis|word_reveal|karaoke, in_ms, out_ms, pulse?}",
+      "template": "from the template lists",
+      "layer": "int",
+      "segment_id": "script segment",
+      "clip_id": "Module 6 clip",
+      "visibility": "{enabled, rule}",
+      "locked": "bool",
+      "edited": "bool",
+      "source": "voiceover|ai|brief|brand_kit|team",
+      "purpose": "why it is there"
+    }
+  },
+  "visual_director_answer": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "visual_style",
+      "style_id",
+      "style_reason",
+      "intensity",
+      "intensity_reason",
+      "palette",
+      "caption_segmentation",
+      "caption_position",
+      "keywords",
+      "hook",
+      "benefits",
+      "price",
+      "offer",
+      "cta",
+      "effects",
+      "warnings",
+      "summary"
+    ],
+    "properties": {
+      "visual_style": {
+        "type": "string"
+      },
+      "style_id": {
+        "type": "string",
+        "enum": [
+          "hormozi",
+          "modern_bold",
+          "karaoke",
+          "minimal",
+          "luxury",
+          "dynamic_pop",
+          "social_ugc"
+        ]
+      },
+      "style_reason": {
+        "type": "string"
+      },
+      "intensity": {
+        "type": "string",
+        "enum": [
+          "minimal",
+          "balanced",
+          "dynamic"
+        ]
+      },
+      "intensity_reason": {
+        "type": "string"
+      },
+      "palette": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "primary",
+          "accent",
+          "text",
+          "reason"
+        ],
+        "properties": {
+          "primary": {
+            "type": "string"
+          },
+          "accent": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "caption_segmentation": {
+        "type": "string",
+        "enum": [
+          "word",
+          "two",
+          "three",
+          "phrase",
+          "sentence"
+        ]
+      },
+      "caption_position": {
+        "type": "string",
+        "enum": [
+          "top",
+          "upper_middle",
+          "center",
+          "lower_middle",
+          "bottom",
+          "auto"
+        ]
+      },
+      "keywords": {
+        "type": "array",
+        "maxItems": 14,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "kind"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "benefit",
+                "product",
+                "feature",
+                "price",
+                "offer",
+                "pain",
+                "hook",
+                "cta"
+              ]
+            }
+          }
+        }
+      },
+      "hook": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "show",
+          "text",
+          "template",
+          "keyword",
+          "reason"
+        ],
+        "properties": {
+          "show": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "bold_headline",
+              "question_headline",
+              "highlighted_keyword",
+              "minimal_premium",
+              "animated_reveal",
+              "benefit_headline"
+            ]
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "benefits": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "segment_id",
+            "template",
+            "source_text",
+            "reason"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "segment_id": {
+              "type": "string"
+            },
+            "template": {
+              "type": "string",
+              "enum": [
+                "label",
+                "badge",
+                "card",
+                "highlight_line",
+                "callout"
+              ]
+            },
+            "source_text": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "price": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "show",
+          "template"
+        ],
+        "properties": {
+          "show": {
+            "type": "boolean"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "price_card",
+              "offer_badge",
+              "premium_price",
+              "promo_banner",
+              "bundle_card",
+              "price_reveal"
+            ]
+          }
+        }
+      },
+      "offer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "show",
+          "template"
+        ],
+        "properties": {
+          "show": {
+            "type": "boolean"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "price_card",
+              "offer_badge",
+              "premium_price",
+              "promo_banner",
+              "bundle_card",
+              "price_reveal"
+            ]
+          }
+        }
+      },
+      "cta": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "text",
+          "template",
+          "reason"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "order_now_text",
+              "shop_now_pill",
+              "showcase_cta",
+              "price_cta",
+              "minimal_premium",
+              "cod_card",
+              "promo_card"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "effects": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "type": "string",
+          "enum": [
+            "gradient_band",
+            "accent_line",
+            "card_reveal",
+            "highlight_pulse",
+            "cta_pulse",
+            "banner_slide",
+            "keyword_scale"
+          ]
+        }
+      },
+      "warnings": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "type": "string"
+        }
+      },
+      "summary": {
+        "type": "string"
+      }
+    }
+  },
+  "caption_styles": {
+    "hormozi": {
+      "id": "hormozi",
+      "name": "Hormozi-Inspired Bold",
+      "description": "Large bold words, high contrast, key words highlighted, controlled pop-in, very short groups.",
+      "builtin": true,
+      "font": "montserrat-black",
+      "size": 0.058,
+      "uppercase": true,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FFD60A",
+      "highlight_mode": "color_scale",
+      "outline": {
+        "width": 0.0055,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.003,
+        "color": "#000000",
+        "opacity": 0.6
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0
+      },
+      "line_spacing": 1,
+      "animation": {
+        "type": "pop",
+        "duration_ms": 160
+      },
+      "position": "lower_middle",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "three",
+      "energy": "high"
+    },
+    "modern_bold": {
+      "id": "modern_bold",
+      "name": "Modern Bold",
+      "description": "Clean sans-serif, strong hierarchy, selective highlight colour, smooth entrance.",
+      "builtin": true,
+      "font": "poppins-extrabold",
+      "size": 0.05,
+      "uppercase": false,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FF6B35",
+      "highlight_mode": "color",
+      "outline": {
+        "width": 0.004,
+        "color": "#111111"
+      },
+      "shadow": {
+        "depth": 0.004,
+        "color": "#000000",
+        "opacity": 0.45
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0
+      },
+      "line_spacing": 1.05,
+      "animation": {
+        "type": "slide_up",
+        "duration_ms": 220
+      },
+      "position": "lower_middle",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "phrase",
+      "energy": "medium"
+    },
+    "karaoke": {
+      "id": "karaoke",
+      "name": "Karaoke Highlight",
+      "description": "A short phrase stays on screen; the word being spoken lights up with the real voice timing.",
+      "builtin": true,
+      "font": "poppins-bold",
+      "size": 0.046,
+      "uppercase": false,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#2EE6A6",
+      "highlight_mode": "color",
+      "outline": {
+        "width": 0.004,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.003,
+        "color": "#000000",
+        "opacity": 0.5
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0
+      },
+      "line_spacing": 1.05,
+      "animation": {
+        "type": "karaoke",
+        "duration_ms": 120
+      },
+      "position": "lower_middle",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "phrase",
+      "energy": "medium"
+    },
+    "minimal": {
+      "id": "minimal",
+      "name": "Minimal Clean",
+      "description": "Simple readable subtitles on a soft panel, minimal animation, neutral colours.",
+      "builtin": true,
+      "font": "poppins-medium",
+      "size": 0.038,
+      "uppercase": false,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FFFFFF",
+      "highlight_mode": "bold",
+      "outline": {
+        "width": 0,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0,
+        "color": "#000000",
+        "opacity": 0
+      },
+      "background": {
+        "mode": "box",
+        "color": "#000000",
+        "opacity": 0.55,
+        "radius": 0.012,
+        "padding": 0.012
+      },
+      "line_spacing": 1.1,
+      "animation": {
+        "type": "fade",
+        "duration_ms": 180
+      },
+      "position": "bottom",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "sentence",
+      "energy": "low"
+    },
+    "luxury": {
+      "id": "luxury",
+      "name": "Luxury",
+      "description": "Elegant serif, ivory and gold, subtle fades, controlled emphasis. For watches, jewellery and premium products.",
+      "builtin": true,
+      "font": "playfair-semibold",
+      "size": 0.044,
+      "uppercase": false,
+      "text_color": "#F7F1E8",
+      "highlight_color": "#D4AF37",
+      "highlight_mode": "color",
+      "outline": {
+        "width": 0.0015,
+        "color": "#1A1A1A"
+      },
+      "shadow": {
+        "depth": 0.0025,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0
+      },
+      "line_spacing": 1.12,
+      "animation": {
+        "type": "fade",
+        "duration_ms": 260
+      },
+      "position": "lower_middle",
+      "max_lines": 2,
+      "safe_margin": 0.08,
+      "segmentation": "phrase",
+      "energy": "low"
+    },
+    "dynamic_pop": {
+      "id": "dynamic_pop",
+      "name": "Dynamic Pop",
+      "description": "Energetic condensed type, short animated groups, scale emphasis on key words.",
+      "builtin": true,
+      "font": "anton",
+      "size": 0.064,
+      "uppercase": true,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FF3B5C",
+      "highlight_mode": "color_scale",
+      "outline": {
+        "width": 0.006,
+        "color": "#000000"
+      },
+      "shadow": {
+        "depth": 0.004,
+        "color": "#000000",
+        "opacity": 0.55
+      },
+      "background": {
+        "mode": "none",
+        "color": "#000000",
+        "opacity": 0,
+        "radius": 0,
+        "padding": 0
+      },
+      "line_spacing": 1,
+      "animation": {
+        "type": "bounce",
+        "duration_ms": 200
+      },
+      "position": "center",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "two",
+      "energy": "high"
+    },
+    "social_ugc": {
+      "id": "social_ugc",
+      "name": "Social UGC",
+      "description": "Natural social-media captions: dark text on a white rounded panel, conversational.",
+      "builtin": true,
+      "font": "poppins-semibold",
+      "size": 0.04,
+      "uppercase": false,
+      "text_color": "#111111",
+      "highlight_color": "#E63946",
+      "highlight_mode": "color",
+      "outline": {
+        "width": 0,
+        "color": "#FFFFFF"
+      },
+      "shadow": {
+        "depth": 0,
+        "color": "#000000",
+        "opacity": 0
+      },
+      "background": {
+        "mode": "box",
+        "color": "#FFFFFF",
+        "opacity": 0.96,
+        "radius": 0.014,
+        "padding": 0.012
+      },
+      "line_spacing": 1.08,
+      "animation": {
+        "type": "pop",
+        "duration_ms": 140
+      },
+      "position": "lower_middle",
+      "max_lines": 2,
+      "safe_margin": 0.07,
+      "segmentation": "phrase",
+      "energy": "medium"
+    }
+  },
+  "safe_zones": {
+    "instagram_reels": {
+      "label": "Instagram Reels",
+      "aspect": "9:16",
+      "top": 0.14,
+      "bottom": 0.35,
+      "left": 0.06,
+      "right": 0.06,
+      "source": "Meta Reels ads guidance as widely cited (14% top, 35% bottom, 6% sides; 40% bottom when a disclaimer is shown). Not confirmed on a Meta page in our 2026-11 review: check the Safe Zone overlay in Ads Manager.",
+      "verified": false
+    },
+    "facebook_reels": {
+      "label": "Facebook Reels",
+      "aspect": "9:16",
+      "top": 0.14,
+      "bottom": 0.35,
+      "left": 0.06,
+      "right": 0.06,
+      "source": "Same as Instagram Reels (Meta Reels ads guidance as widely cited, reviewed 2026-11; confirm in Ads Manager).",
+      "verified": false
+    },
+    "facebook_feed": {
+      "label": "Facebook Feed",
+      "aspect": "4:5",
+      "top": 0.05,
+      "bottom": 0.1,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Conservative margin: feed videos show the full frame; the bottom can be covered by captions/controls.",
+      "verified": false
+    },
+    "instagram_feed": {
+      "label": "Instagram Feed",
+      "aspect": "4:5",
+      "top": 0.05,
+      "bottom": 0.1,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Conservative margin for feed placements.",
+      "verified": false
+    },
+    "tiktok": {
+      "label": "TikTok",
+      "aspect": "9:16",
+      "top": 0.09,
+      "bottom": 0.25,
+      "left": 0.06,
+      "right": 0.15,
+      "source": "Approximate TikTok interface (caption and account at the bottom, buttons on the right). Check TikTok Ads Manager safe-zone overlay.",
+      "verified": false
+    },
+    "youtube_shorts": {
+      "label": "YouTube Shorts",
+      "aspect": "9:16",
+      "top": 0.1,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.14,
+      "source": "Approximate Shorts interface (title and channel at the bottom, buttons on the right).",
+      "verified": false
+    },
+    "youtube_ads": {
+      "label": "YouTube Ads (in-stream)",
+      "aspect": "16:9",
+      "top": 0.06,
+      "bottom": 0.16,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Approximate: skip button, progress bar and advertiser card at the bottom.",
+      "verified": false
+    },
+    "generic_vertical": {
+      "label": "Generic vertical 9:16",
+      "aspect": "9:16",
+      "top": 0.1,
+      "bottom": 0.22,
+      "left": 0.06,
+      "right": 0.1,
+      "source": "Conservative default covering the common vertical interfaces.",
+      "verified": false
+    },
+    "generic_square": {
+      "label": "Generic square 1:1",
+      "aspect": "1:1",
+      "top": 0.05,
+      "bottom": 0.08,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Conservative default.",
+      "verified": false
+    },
+    "generic_45": {
+      "label": "Generic 4:5",
+      "aspect": "4:5",
+      "top": 0.05,
+      "bottom": 0.1,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Conservative default.",
+      "verified": false
+    },
+    "generic_landscape": {
+      "label": "Generic landscape 16:9",
+      "aspect": "16:9",
+      "top": 0.05,
+      "bottom": 0.1,
+      "left": 0.05,
+      "right": 0.05,
+      "source": "Conservative default.",
+      "verified": false
+    }
+  },
+  "animations": [
+    "static",
+    "fade",
+    "slide_up",
+    "slide_in",
+    "pop",
+    "bounce",
+    "scale_emphasis",
+    "word_reveal",
+    "karaoke"
+  ],
+  "intensities": {
+    "minimal": {
+      "label": "Minimal",
+      "highlight_share": 0.12,
+      "benefits": 1,
+      "effects": [
+        "gradient_band"
+      ],
+      "hook": "static_or_fade",
+      "price_templates": [
+        "price_card",
+        "premium_price"
+      ],
+      "anim_scale": 0.6
+    },
+    "balanced": {
+      "label": "Balanced",
+      "highlight_share": 0.25,
+      "benefits": 2,
+      "effects": [
+        "gradient_band",
+        "accent_line",
+        "card_reveal",
+        "highlight_pulse",
+        "cta_pulse"
+      ],
+      "hook": "animated",
+      "anim_scale": 1
+    },
+    "dynamic": {
+      "label": "Dynamic",
+      "highlight_share": 0.35,
+      "benefits": 3,
+      "effects": [
+        "gradient_band",
+        "accent_line",
+        "card_reveal",
+        "highlight_pulse",
+        "cta_pulse",
+        "banner_slide",
+        "keyword_scale"
+      ],
+      "hook": "animated",
+      "anim_scale": 1.25
+    }
+  },
+  "templates": {
+    "hook": {
+      "bold_headline": "Bold headline",
+      "question_headline": "Question headline",
+      "highlighted_keyword": "Highlighted keyword",
+      "minimal_premium": "Minimal premium headline",
+      "animated_reveal": "Animated text reveal",
+      "benefit_headline": "Product benefit headline"
+    },
+    "benefit": {
+      "label": "Text label",
+      "badge": "Feature badge",
+      "card": "Feature information card",
+      "highlight_line": "Highlight line",
+      "callout": "Callout with pointer (needs the product position)"
+    },
+    "price": {
+      "price_card": "Clean price card",
+      "offer_badge": "Bold offer badge",
+      "premium_price": "Premium price display",
+      "promo_banner": "Promotional banner",
+      "bundle_card": "Bundle offer card",
+      "price_reveal": "Animated price reveal"
+    },
+    "cta": {
+      "order_now_text": "Animated “Order now” text",
+      "shop_now_pill": "Shop-now style label",
+      "showcase_cta": "Product showcase with CTA",
+      "price_cta": "Price and CTA",
+      "minimal_premium": "Minimal premium closing",
+      "cod_card": "Cash on delivery closing card",
+      "promo_card": "Promotional closing card"
+    }
+  },
+  "effects": {
+    "gradient_band": "Soft dark gradient behind the captions (readability)",
+    "accent_line": "Graphic accent line under the hook",
+    "card_reveal": "Benefit cards slide in",
+    "highlight_pulse": "One gentle pulse on a highlighted keyword",
+    "cta_pulse": "Slow pulse on the CTA label",
+    "banner_slide": "Offer banner slides in",
+    "keyword_scale": "Highlighted words scale up slightly"
+  },
+  "fonts": {
+    "montserrat-black": {
+      "family": "Montserrat Black",
+      "file": "Montserrat_900Black.ttf",
+      "label": "Montserrat Black",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "montserrat-extrabold": {
+      "family": "Montserrat ExtraBold",
+      "file": "Montserrat_800ExtraBold.ttf",
+      "label": "Montserrat ExtraBold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "montserrat-medium": {
+      "family": "Montserrat Medium",
+      "file": "Montserrat_500Medium.ttf",
+      "label": "Montserrat Medium",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "poppins-extrabold": {
+      "family": "Poppins ExtraBold",
+      "file": "Poppins_800ExtraBold.ttf",
+      "label": "Poppins ExtraBold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "poppins-bold": {
+      "family": "Poppins",
+      "file": "Poppins_700Bold.ttf",
+      "label": "Poppins Bold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1",
+      "bold": true
+    },
+    "poppins-semibold": {
+      "family": "Poppins SemiBold",
+      "file": "Poppins_600SemiBold.ttf",
+      "label": "Poppins SemiBold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "poppins-medium": {
+      "family": "Poppins Medium",
+      "file": "Poppins_500Medium.ttf",
+      "label": "Poppins Medium",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "playfair-semibold": {
+      "family": "Playfair Display SemiBold",
+      "file": "PlayfairDisplay_600SemiBold.ttf",
+      "label": "Playfair Display SemiBold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "playfair-bold": {
+      "family": "Playfair Display",
+      "file": "PlayfairDisplay_700Bold.ttf",
+      "label": "Playfair Display Bold",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1",
+      "bold": true
+    },
+    "anton": {
+      "family": "Anton",
+      "file": "Anton_400Regular.ttf",
+      "label": "Anton",
+      "scripts": [
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "cairo-semibold": {
+      "family": "Cairo SemiBold",
+      "file": "Cairo_600SemiBold.ttf",
+      "label": "Cairo SemiBold (Arabic + Latin)",
+      "scripts": [
+        "arabic",
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    },
+    "cairo-bold": {
+      "family": "Cairo",
+      "file": "Cairo_700Bold.ttf",
+      "label": "Cairo Bold (Arabic + Latin)",
+      "scripts": [
+        "arabic",
+        "latin"
+      ],
+      "license": "OFL-1.1",
+      "bold": true
+    },
+    "cairo-extrabold": {
+      "family": "Cairo ExtraBold",
+      "file": "Cairo_800ExtraBold.ttf",
+      "label": "Cairo ExtraBold (Arabic + Latin)",
+      "scripts": [
+        "arabic",
+        "latin"
+      ],
+      "license": "OFL-1.1"
+    }
+  }
+}

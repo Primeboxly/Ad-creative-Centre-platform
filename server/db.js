@@ -543,3 +543,73 @@ CREATE TABLE IF NOT EXISTS vd_usage (
 );`);
 // A restart stops rendering: running work goes back to the queue (it starts again from the start of its stage).
 db.exec(`UPDATE vd_jobs SET status = 'queued' WHERE status = 'running';`);
+// ---------- Module 7: AI Captions & Visual Effects ----------
+db.exec(`
+-- Reusable brand kits (optional) and team caption presets; safe-zone presets updated by admins (code defaults otherwise).
+CREATE TABLE IF NOT EXISTS vx_brand_kits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, logo_key TEXT NOT NULL DEFAULT '', logo_ratio REAL NOT NULL DEFAULT 1,
+  primary_color TEXT NOT NULL DEFAULT '', secondary_color TEXT NOT NULL DEFAULT '', accent_color TEXT NOT NULL DEFAULT '',
+  fonts TEXT NOT NULL DEFAULT '[]', caption_style TEXT NOT NULL DEFAULT '', cta_style TEXT NOT NULL DEFAULT '', logo_position TEXT NOT NULL DEFAULT 'top_right',
+  logo_visible INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS vx_caption_styles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, base TEXT NOT NULL, config TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS vx_safe_zones (key TEXT PRIMARY KEY, config TEXT NOT NULL, updated_by INTEGER REFERENCES users(id), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- One visual enhancement per approved video edit (Module 6 approval) of a planned video.
+CREATE TABLE IF NOT EXISTS vx_projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL, variation_index INTEGER NOT NULL DEFAULT 1, vd_edit_id INTEGER NOT NULL REFERENCES vd_edits(id) ON DELETE CASCADE,
+  vd_approval_id INTEGER NOT NULL REFERENCES vd_approvals(id) ON DELETE CASCADE, status TEXT NOT NULL DEFAULT 'draft', error TEXT NOT NULL DEFAULT '',
+  approved_version_id INTEGER, approved_render_id INTEGER, created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (vd_approval_id)
+);
+-- Versions of the Visual Enhancement Plan (director decisions, plan, settings, checks). Approved versions are frozen.
+CREATE TABLE IF NOT EXISTS vx_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, vx_id INTEGER NOT NULL REFERENCES vx_projects(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL, parent_id INTEGER, label TEXT NOT NULL DEFAULT '', frozen INTEGER NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
+  director TEXT NOT NULL DEFAULT '', plan TEXT NOT NULL DEFAULT '', plan_hash TEXT NOT NULL DEFAULT '', settings TEXT NOT NULL DEFAULT '{}',
+  validation TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (vx_id, number)
+);
+-- Timeline elements and caption words of each version (also inside the plan JSON), as rows for queries and Module 8.
+CREATE TABLE IF NOT EXISTS vx_elements (
+  version_id INTEGER NOT NULL REFERENCES vx_versions(id) ON DELETE CASCADE, element_id TEXT NOT NULL, type TEXT NOT NULL, track TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '', start REAL NOT NULL, end REAL NOT NULL, layer INTEGER NOT NULL DEFAULT 0, template TEXT NOT NULL DEFAULT '',
+  animation TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, locked INTEGER NOT NULL DEFAULT 0, edited INTEGER NOT NULL DEFAULT 0,
+  segment_id TEXT, clip_id TEXT, PRIMARY KEY (version_id, element_id)
+);
+CREATE TABLE IF NOT EXISTS vx_caption_words (
+  version_id INTEGER NOT NULL REFERENCES vx_versions(id) ON DELETE CASCADE, element_id TEXT NOT NULL, idx INTEGER NOT NULL,
+  word TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, highlight TEXT NOT NULL DEFAULT '', timing TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (version_id, element_id, idx)
+);
+CREATE TABLE IF NOT EXISTS vx_renders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, vx_id INTEGER NOT NULL REFERENCES vx_projects(id) ON DELETE CASCADE, version_id INTEGER NOT NULL REFERENCES vx_versions(id) ON DELETE CASCADE,
+  quality TEXT NOT NULL, plan_hash TEXT NOT NULL, edl_hash TEXT NOT NULL DEFAULT '', config_hash TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending', storage_key TEXT NOT NULL DEFAULT '', thumb_key TEXT NOT NULL DEFAULT '', ass_key TEXT NOT NULL DEFAULT '',
+  duration REAL NOT NULL DEFAULT 0, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, fps REAL NOT NULL DEFAULT 0,
+  vcodec TEXT NOT NULL DEFAULT '', acodec TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, qc TEXT NOT NULL DEFAULT '', qc_ok INTEGER NOT NULL DEFAULT 0,
+  render_seconds REAL NOT NULL DEFAULT 0, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vxr_hash ON vx_renders(plan_hash, config_hash);
+CREATE TABLE IF NOT EXISTS vx_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, vx_id INTEGER NOT NULL REFERENCES vx_projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', options TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
+  stage TEXT NOT NULL DEFAULT '', progress REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+  error TEXT NOT NULL DEFAULT '', failed_stage TEXT NOT NULL DEFAULT '', log TEXT NOT NULL DEFAULT '', render_id INTEGER,
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vxj_status ON vx_jobs(status, id);
+CREATE TABLE IF NOT EXISTS vx_approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, vx_id INTEGER NOT NULL REFERENCES vx_projects(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES vx_versions(id) ON DELETE CASCADE, render_id INTEGER NOT NULL REFERENCES vx_renders(id) ON DELETE CASCADE,
+  package TEXT NOT NULL, approved_by INTEGER REFERENCES users(id), approved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS vx_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, vx_id INTEGER, render_id INTEGER, job_id INTEGER, quality TEXT NOT NULL DEFAULT '', wall_seconds REAL NOT NULL DEFAULT 0,
+  output_bytes INTEGER NOT NULL DEFAULT 0, peak_rss_mb REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '',
+  user_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+db.exec(`UPDATE vx_jobs SET status = 'queued' WHERE status = 'running';`);
