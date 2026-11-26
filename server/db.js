@@ -480,3 +480,66 @@ CREATE TABLE IF NOT EXISTS audio_usage (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 db.exec(`UPDATE au_jobs SET status = 'queued' WHERE status = 'running';`);
+
+// ---------- Module 6: AI video editing engine (new tables only) ----------
+db.exec(`
+-- One video edit per approved Audio Production Package (Module 5) of a planned video.
+CREATE TABLE IF NOT EXISTS vd_edits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES creative_projects(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL, variation_index INTEGER NOT NULL DEFAULT 1, brief_id INTEGER NOT NULL, sb_plan_id INTEGER NOT NULL,
+  sb_version_id INTEGER NOT NULL, au_production_id INTEGER NOT NULL REFERENCES au_productions(id) ON DELETE CASCADE,
+  au_approval_id INTEGER NOT NULL REFERENCES au_approvals(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'draft', error TEXT NOT NULL DEFAULT '', approved_version_id INTEGER, approved_render_id INTEGER,
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (au_approval_id)
+);
+-- Versions of the editing plan: AI director decisions, the Editing Decision List (EDL), output settings, checks.
+CREATE TABLE IF NOT EXISTS vd_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, edit_id INTEGER NOT NULL REFERENCES vd_edits(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL, parent_id INTEGER, label TEXT NOT NULL DEFAULT '', frozen INTEGER NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
+  director TEXT NOT NULL DEFAULT '', edl TEXT NOT NULL DEFAULT '', edl_hash TEXT NOT NULL DEFAULT '', settings TEXT NOT NULL DEFAULT '{}',
+  validation TEXT NOT NULL DEFAULT '', created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (edit_id, number)
+);
+-- Clips of each version (also inside the EDL JSON): kept as rows so scene use can be checked and queried.
+CREATE TABLE IF NOT EXISTS vd_clips (
+  version_id INTEGER NOT NULL REFERENCES vd_versions(id) ON DELETE CASCADE, clip_id TEXT NOT NULL, ord INTEGER NOT NULL,
+  scene_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, segment_id TEXT NOT NULL DEFAULT '', timeline_start REAL NOT NULL, timeline_end REAL NOT NULL,
+  source_start REAL NOT NULL, source_end REAL NOT NULL, PRIMARY KEY (version_id, clip_id)
+);
+CREATE INDEX IF NOT EXISTS idx_vdclips_scene ON vd_clips(scene_id);
+-- Rendered videos (preview / standard / high). Same EDL + same settings = same render (reused, never made twice).
+CREATE TABLE IF NOT EXISTS vd_renders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, edit_id INTEGER NOT NULL REFERENCES vd_edits(id) ON DELETE CASCADE, version_id INTEGER NOT NULL REFERENCES vd_versions(id) ON DELETE CASCADE,
+  quality TEXT NOT NULL, edl_hash TEXT NOT NULL, config_hash TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending', storage_key TEXT NOT NULL DEFAULT '', thumb_key TEXT NOT NULL DEFAULT '', audio_key TEXT NOT NULL DEFAULT '',
+  duration REAL NOT NULL DEFAULT 0, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, fps REAL NOT NULL DEFAULT 0,
+  vcodec TEXT NOT NULL DEFAULT '', acodec TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, qc TEXT NOT NULL DEFAULT '', qc_ok INTEGER NOT NULL DEFAULT 0,
+  render_seconds REAL NOT NULL DEFAULT 0, created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vdr_hash ON vd_renders(edl_hash, config_hash);
+-- Normalized clip cache (re-used by later renders while the clip, source and quality stay the same).
+CREATE TABLE IF NOT EXISTS vd_clip_cache (hash TEXT PRIMARY KEY, storage_key TEXT NOT NULL, frames INTEGER NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+  project_id INTEGER, used_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS vd_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, edit_id INTEGER NOT NULL REFERENCES vd_edits(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', options TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
+  stage TEXT NOT NULL DEFAULT '', progress REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 2,
+  error TEXT NOT NULL DEFAULT '', failed_stage TEXT NOT NULL DEFAULT '', log TEXT NOT NULL DEFAULT '', render_id INTEGER,
+  created_by INTEGER REFERENCES users(id), created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vdj_status ON vd_jobs(status, id);
+CREATE TABLE IF NOT EXISTS vd_approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, edit_id INTEGER NOT NULL REFERENCES vd_edits(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES vd_versions(id) ON DELETE CASCADE, render_id INTEGER NOT NULL REFERENCES vd_renders(id) ON DELETE CASCADE,
+  package TEXT NOT NULL, approved_by INTEGER REFERENCES users(id), approved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Render usage: wall time, CPU time of ffmpeg, output size, temporary disk used (no invented costs).
+CREATE TABLE IF NOT EXISTS vd_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, edit_id INTEGER, render_id INTEGER, job_id INTEGER, quality TEXT NOT NULL DEFAULT '', clips INTEGER NOT NULL DEFAULT 0,
+  clips_cached INTEGER NOT NULL DEFAULT 0, wall_seconds REAL NOT NULL DEFAULT 0, cpu_seconds REAL NOT NULL DEFAULT 0, output_bytes INTEGER NOT NULL DEFAULT 0,
+  temp_bytes INTEGER NOT NULL DEFAULT 0, peak_rss_mb REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '',
+  user_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+// A restart stops rendering: running work goes back to the queue (it starts again from the start of its stage).
+db.exec(`UPDATE vd_jobs SET status = 'queued' WHERE status = 'running';`);

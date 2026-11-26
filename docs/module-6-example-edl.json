@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "edit_id": 1,
+  "project_id": 1,
+  "variation_index": 1,
+  "brief": { "id": 1, "version": 1 },
+  "script_version": { "id": 2, "number": 1 },
+  "storyboard_version": { "id": 2, "number": 1 },
+  "audio_package": { "id": 1, "version_id": 1, "schema_version": "1.0" },
+  "timeline": { "duration": 15, "frames": 450, "fps": 30, "aspect_ratio": "9:16", "width": 1080, "height": 1920, "pace": "dynamic" },
+  "tracks": {
+    "video": [
+      {
+        "id": "c1", "order": 1, "shot_id": "k1", "asset_id": 1, "scene_id": 1, "source_key": "footage/p1/a/silent.mp4", "segment_id": "s1", "role": "hook",
+        "source_start": 0, "source_end": 2.467, "timeline_start": 0, "timeline_end": 2.467, "start_frame": 0, "frames": 74, "speed": 1,
+        "crop": { "mode": "center_crop", "x": 0.5, "y": 0.5, "zoom": 1, "uncertain": false }, "position": { "x": 0.5, "y": 0.5 }, "scale": 1,
+        "motion": "zoom_in", "hold": 0, "transition_in": { "type": "hard_cut", "duration": 0.4 },
+        "reason": "Storyboard choice: close view of the product matches the spoken hook", "locked": false, "source": "storyboard"
+      },
+      {
+        "id": "c2", "order": 2, "shot_id": "k2", "asset_id": 2, "scene_id": 4, "source_key": "footage/p1/b/silent.mp4", "segment_id": "s2", "role": "product_intro",
+        "source_start": 0, "source_end": 1.7, "timeline_start": 2.467, "timeline_end": 4.167, "start_frame": 74, "frames": 51, "speed": 1,
+        "crop": { "mode": "smart_crop", "x": 0.5, "y": 0.5, "zoom": 1, "uncertain": true }, "position": { "x": 0.5, "y": 0.5 }, "scale": 1,
+        "motion": "none", "hold": 0, "transition_in": { "type": "hard_cut", "duration": 0.4 },
+        "reason": "Storyboard choice", "locked": false, "source": "storyboard"
+      },
+      {
+        "id": "c3", "order": 3, "shot_id": "k6", "asset_id": 3, "scene_id": 6, "source_key": "footage/p1/c/silent.mp4", "segment_id": "s5", "role": "cta",
+        "source_start": 0, "source_end": 3.4, "timeline_start": 4.167, "timeline_end": 15, "start_frame": 125, "frames": 325, "speed": 1,
+        "crop": { "mode": "fit_background", "x": 0.5, "y": 0.5, "zoom": 1, "uncertain": false }, "position": { "x": 0.5, "y": 0.5 }, "scale": 1,
+        "motion": "none", "hold": 0, "transition_in": { "type": "crossfade", "duration": 0.4 },
+        "reason": "Shortened example: a real EDL splits long segments into several clips", "locked": true, "source": "team"
+      }
+    ],
+    "voiceover": { "key": "audio/p1/prod1/vo-1795689000000.mp3", "start": 0.25, "duration": 10.6, "speech_end": 10.85, "segments": [ { "segment_id": "s1", "start": 0.25, "end": 2.45 } ] },
+    "music": { "key": "audio/p1/prod1/music-1795689000000.mp3", "name": "upbeat · modern pop", "fade_in": 0.6, "fade_out": 1.2 },
+    "mix": { "key": "audio/p1/prod1/mix-1795689000000.mp3", "config": { "final_lufs": -14, "true_peak": -1.5 }, "measured": { "i": -14.2, "tp": -10, "lra": 3 } },
+    "captions": { "reserved": true, "source": "audio package captions (word timing)" },
+    "overlays": { "reserved": true, "suggestions": [ { "shot_id": "k1", "segment_id": "s1", "text": "The perfect gift?", "start": 0, "end": 2.467, "emphasis": true } ] },
+    "effects": { "reserved": true }
+  },
+  "audio": { "voice_gain_db": 0, "music_gain_db": 0, "uses_package_mix": true, "footage_audio": "excluded" },
+  "safe_area": { "top": 0.1, "bottom": 0.2, "left": 0.06, "right": 0.12 },
+  "segments": [ { "id": "s1", "role": "hook", "start": 0, "end": 2.47, "speech_start": 0.25, "speech_end": 2.45 } ],
+  "director": { "pace": "dynamic", "pace_reason": "Brief asks for dynamic.", "transition_strategy": "Hard cuts", "framing_strategy": "Crop to the format around the product", "opening": { "start_offset": 0, "note": "The first scene starts on the product." }, "summary": "7 shots, dynamic pace, hard cuts.", "warnings": [] },
+  "validation": { "valid": true, "errors": 0, "warnings": 3, "checked_at": "2026-11-26T10:40:00.000Z" }
+}

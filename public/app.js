@@ -912,7 +912,7 @@ async function renderHub(kind) {
 }
 
 // ---------- Creative projects (Module 3): list, new project, 6-step workflow, Creative Brief ----------
-const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝'], ['audio', 'Audio studio', '🎙']];
+const CP_STEPS = [['product', 'Product', '📦'], ['angles', 'Marketing angles', '🎯'], ['footage', 'Footage', '🎞'], ['type', 'Creative type', '🎬'], ['settings', 'Settings', '⚙️'], ['review', 'Review & save', '✅'], ['script', 'Script & storyboard', '📝'], ['audio', 'Audio studio', '🎙'], ['video', 'Video editing', '🎬']];
 const CP_STATUS = { draft: '📝 Draft', ready: '✅ Brief saved' };
 const AIR = 'ai_recommended';
 let REG = null;
@@ -1019,7 +1019,7 @@ function drawProject(keepScroll = false) {
   const y = window.scrollY, active = document.activeElement?.id;
   const errs = st.validation.errors, warns = st.validation.warnings;
   const stepIssues = k => errs.filter(e => e.step === k).length;
-  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false, audio: false };
+  const done = { product: true, angles: st.angle_ids.length > 0, footage: st.footage.used_ids.length > 0, type: s.types.length > 0, settings: !errs.some(e => e.step === 'settings'), review: st.project.status === 'ready', script: false, audio: false, video: false };
   v.innerHTML = `
     <a class="back" href="#projects">← Creative projects</a>
     <section class="ag-hero cp-hero">
@@ -1046,7 +1046,7 @@ function drawProject(keepScroll = false) {
     <div class="cp-nav">
       ${state.cpStep !== 'product' ? '<button class="btn" id="cpPrev">← Back</button>' : '<span></span>'}
       <span class="muted small">${errs.length ? `⛔ ${errs.length} blocking · ` : ''}${warns.length ? `⚠ ${warns.length} warning${warns.length > 1 ? 's' : ''}` : errs.length ? '' : '✓ Ready'}</span>
-      ${state.cpStep === 'audio' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
+      ${state.cpStep === 'video' ? '<span></span>' : state.cpStep !== 'review' ? '<button class="btn primary big" id="cpNext">Next →</button>' : `<div class="row"><button class="btn primary big" id="cpBrief" ${st.can_edit && !errs.length ? '' : 'disabled'}>✅ Save Creative Brief</button>${st.briefs.length ? '<button class="btn big" id="cpToScript">📝 Script & storyboard →</button>' : ''}</div>`}
     </div>`;
   const go = async k => { await cpFlush(); state.cpStep = k; location.hash = `project/${st.project.id}/${k}`; };
   v.querySelectorAll('[data-cpstep]').forEach(b => b.onclick = () => go(b.dataset.cpstep));
@@ -1062,7 +1062,7 @@ function drawProject(keepScroll = false) {
     if (!confirm(`Delete the project "${st.project.name}" and its saved briefs? Products and footage are not touched.`)) return;
     try { await api(`/api/creative-projects/${st.project.id}`, { method: 'DELETE' }); toast('Project deleted'); location.hash = 'projects'; refreshSide(); } catch (e) { fail(e); }
   });
-  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript, audio: cpAudio })[state.cpStep]();
+  ({ product: cpProduct, angles: cpAngles, footage: cpFootage, type: cpType, settings: cpSettings, review: cpReview, script: cpScript, audio: cpAudio, video: cpVideo })[state.cpStep]();
   const onStep = v.querySelector('.sstep.on'); if (onStep) onStep.parentElement.scrollLeft = Math.max(0, onStep.offsetLeft - 60);
   if (!st.can_edit) $('#cpBody').querySelectorAll('input, select, textarea, button:not([data-view])').forEach(x => { x.disabled = true; });
   if (keepScroll) { window.scrollTo(0, y); if (active) { const el = document.getElementById(active); if (el && el.type !== 'checkbox') { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } } }
@@ -1670,8 +1670,8 @@ function sbHover(box) {
   box.onmouseleave = () => { if (v) { v.pause(); v.remove(); v = null; } };
 }
 // Pick a scene among the brief's usable scenes.
-function sbPicker(onPick, current = null) {
-  const scenes = state.sb.scenes, cats = state.footCfg?.categories || {};
+function sbPicker(onPick, current = null, pool = null) {
+  const scenes = pool || state.sb.scenes, cats = state.footCfg?.categories || {};
   const m = document.createElement('div');
   m.className = 'modal';
   const draw = (q = '', cat = '') => {
@@ -2054,6 +2054,235 @@ async function auCompare() {
     auModal(`<div class="sec-h"><div><h2>⇄ v${d.a} → v${d.b}</h2></div><button class="btn sm" data-x>Close</button></div>
       ${d.changes.length ? d.changes.map(c => `<p><b>${esc(c.field)}</b></p><p class="sb-del">${esc(typeof c.before === 'object' ? JSON.stringify(c.before) : c.before ?? '—')}</p><p class="sb-add">${esc(typeof c.after === 'object' ? JSON.stringify(c.after) : c.after ?? '—')}</p>`).join('') : '<p class="muted">No change.</p>'}
       <div class="au-cmp">${d.voiceovers.map((v, i) => v ? `<div><b>Voice-over v${i ? d.b : d.a}</b><audio controls preload="none" src="/api/audio-productions/${id}/media/voiceover?vo=${v}"></audio></div>` : '').join('')}</div>`);
+  } catch (e) { fail(e); }
+}
+
+// ---------- Module 6: Video editing (AI video editing engine) ----------
+const VD_STATUS = { draft: 'Draft', queued: 'Queued…', validating_inputs: 'Validating inputs…', preparing_plan: 'Preparing editing plan…', resolving_footage: 'Resolving footage…', preparing_video: 'Preparing video clips…',
+  preparing_audio: 'Preparing audio…', building_timeline: 'Building timeline…', rendering: 'Rendering…', quality_checking: 'Quality checking…', uploading: 'Uploading output…', ready: 'Ready for review', approved: 'Approved', failed: 'Failed', cancelled: 'Cancelled' };
+const VD_FRAMING = { smart_crop: 'Smart crop', center_crop: 'Center crop', fit_background: 'Fit with background', product_focus: 'Product focus', manual: 'Manual' };
+const VD_TRANS = { hard_cut: 'Hard cut', crossfade: 'Crossfade', fade_in: 'Fade in', fade_out: 'Fade out (previous clip)', dip_to_black: 'Dip to black' };
+const VD_MOTION = { none: 'None', zoom_in: 'Subtle zoom in', zoom_out: 'Subtle zoom out' };
+const vdBusy = v => ['queued', 'running'].includes(v?.job?.status);
+const vdMB = b => `${(b / 1048576).toFixed(1)} MB`;
+
+async function cpVideo() {
+  const st = state.cp, body = $('#cpBody');
+  body.innerHTML = '<div class="card"><p class="muted">Loading video editing…</p></div>';
+  const list = await api(`/api/creative-projects/${st.project.id}/video`).catch(fail);
+  if (!list) return;
+  state.vdList = list.videos;
+  if (!list.videos.length) {
+    body.innerHTML = `<div class="card s-empty"><div class="s-empty-ic">🎬</div><h2>Approve the audio first</h2><p class="muted">The video is edited from the approved voice-over, music and synchronized storyboard (step 8).</p><button class="btn primary big" id="vdToAudio">Go to Audio studio</button></div>`;
+    $('#vdToAudio').onclick = () => { location.hash = `project/${st.project.id}/audio`; };
+    return;
+  }
+  if (!list.videos.some(x => x.au_approval_id === state.vdSel)) state.vdSel = (list.videos.find(x => x.latest) || list.videos[0]).au_approval_id;
+  const sel = list.videos.find(x => x.au_approval_id === state.vdSel);
+  state.vd = sel.edit_id ? await api(`/api/video-edits/${sel.edit_id}`).catch(fail) : null;
+  state.vdClip = null; state.vdRender = null;
+  vdDraw();
+}
+async function vdReload() { if (state.vd) state.vd = await api(`/api/video-edits/${state.vd.edit.id}`); vdDraw(); }
+function vdPoll() {
+  clearTimeout(state.vdTimer);
+  const id = state.vd?.edit.id;
+  state.vdTimer = setTimeout(async () => {
+    if (state.cpStep !== 'video' || state.vd?.edit.id !== id) return;
+    try { state.vd = await api(`/api/video-edits/${id}`); } catch { return; }
+    if (!vdBusy(state.vd)) state.vdRender = null;
+    vdDraw();
+  }, 1500);
+}
+const vdPatch = body => sbAct(async () => { state.vd = await api(`/api/video-edits/${state.vd.edit.id}`, { method: 'PATCH', body }); vdDraw(); });
+const vdJob = (kind, quality = '', extra = {}) => sbAct(async () => { await api(`/api/video-edits/${state.vd.edit.id}/jobs`, { method: 'POST', body: { kind, quality, ...extra } }); await vdReload(); });
+
+function vdDraw() {
+  const y = window.scrollY;
+  const st = state.cp, v = state.vd, list = state.vdList;
+  const sel = list.find(x => x.au_approval_id === state.vdSel);
+  const busy = vdBusy(v), edit = st.can_edit && !busy && !v?.edit.outdated;
+  const head = `
+    <section class="card sb-head">
+      <div class="sb-head-row">
+        <label>Approved audio <select id="vdSel">${list.map(x => `<option value="${x.au_approval_id}" ${x.au_approval_id === state.vdSel ? 'selected' : ''}>Video ${x.variation_index} · script v${x.script_version} · audio v${x.audio_version}${x.latest ? '' : ' (older)'}${x.edit_id ? ' · edit started' : ''}</option>`).join('')}</select></label>
+        ${v ? `<span class="pst ${v.edit.status === 'approved' ? 'st-scaling' : v.edit.status === 'failed' ? 'st-paused' : 'st-idea'}">${VD_STATUS[v.edit.status] || v.edit.status}</span>` : ''}
+      </div>
+      ${v?.edit.outdated ? `<div class="cp-err">⛔ ${esc(v.edit.problems[0] || 'This edit uses older approved content.')} This edit is kept as it is.</div>` : !sel.latest ? '<div class="cp-warn">⚠ A newer audio was approved for this video: choose it above.</div>' : ''}
+      ${busy ? `<div class="sb-progress"><div class="ai-orb"><span></span><span></span><span></span></div><div><b>${VD_STATUS[v.job.stage] || VD_STATUS[v.edit.status] || 'Working…'}</b>${v.job.target ? ` <span class="small muted">${esc(v.job.target)} quality</span>` : ''}<div class="fv-bar"><i style="width:${Math.max(3, Math.round((v.job.progress || 0) * 100))}%"></i></div></div><button class="btn sm" id="vdCancel">⏹ Cancel rendering</button></div>` : ''}
+      ${v?.job?.status === 'failed' ? `<div class="cp-err">⛔ ${v.job.failed_stage ? `Stopped while ${esc((VD_STATUS[v.job.failed_stage] || v.job.failed_stage).replace('…', '').toLowerCase())}: ` : ''}${esc(v.job.error)} <a id="vdRetry">↻ Retry rendering</a></div>` : ''}
+      <div class="sb-head-row">
+        ${!v?.edl ? `<button class="btn primary big" id="vdGen" ${st.can_edit && !busy && sel.latest ? '' : 'disabled'}>🎬 Generate Video Creative</button><span class="small muted">One click: checks the approved script, storyboard and audio → AI editing plan → real footage cuts on the voice → framing → transitions → MP4 render → quality check → preview.</span>`
+          : `<button class="btn primary" data-render="preview" ${edit ? '' : 'disabled'}>▶ Render preview</button><button class="btn" data-render="standard" ${edit ? '' : 'disabled'}>Render Standard</button><button class="btn" data-render="high" ${edit ? '' : 'disabled'}>Render High</button><button class="btn" id="vdRebuild" ${edit ? '' : 'disabled'} title="New AI editing plan (locked clips are kept)">↻ Regenerate timeline</button>`}
+        ${v ? `<span class="small muted sb-cost">${v.usage.renders} render${v.usage.renders === 1 ? '' : 's'} · ${v.usage.render_seconds} s rendering · ${v.usage.output_mb} MB · ${v.usage.clips_reused}/${v.usage.clips_total} clips reused · AI ${v.usage.ai_usd.toFixed(3)}</span>` : ''}
+      </div>
+    </section>`;
+  if (!v || !v.edl) {
+    $('#cpBody').innerHTML = head + `<div class="card s-empty"><div class="s-empty-ic">🎞</div><h2>No edit yet for video ${sel.variation_index}</h2><p class="muted">The AI Video Editing Director reads the approved script v${sel.script_version}, the real voice-over timing (audio v${sel.audio_version}) and your analysed footage, then the engine cuts, frames and renders a real MP4. The footage's own sound is never used.</p></div>`;
+    vdWire(); if (busy) vdPoll(); return;
+  }
+  const c = v.context || {}, edl = v.edl, val = v.validation || { errors: [], warnings: [] }, dir = v.director || {};
+  const total = edl.timeline.duration, pct = t => `${((t / total) * 100).toFixed(3)}%`;
+  const ready = v.renders.filter(r => r.status === 'ready');
+  const shown = ready.find(r => r.id === state.vdRender) || ready.find(r => r.current) || ready[0];
+  const stale = !ready.some(r => r.current);
+  const clip = edl.tracks.video.find(x => x.id === state.vdClip);
+  const seg = id => c.segments?.find(w => w.id === id);
+  const peaks = v.waveform || [], vo = edl.tracks.voiceover;
+  const wave = peaks.length && vo ? `<svg class="vd-wave" viewBox="0 0 ${peaks.length} 100" preserveAspectRatio="none" style="left:${pct(vo.start)};width:${pct(vo.duration)}"><path d="${peaks.map((p, i) => `M${i} ${50 - p * 48}V${50 + p * 48}`).join('')}"/></svg>` : '';
+  const scene = id => v.scenes.find(s => s.id === id);
+  $('#cpBody').innerHTML = head + `
+    <section class="card"><div class="sec-h"><div><h2>📋 Creative summary</h2><small>Editing version v${v.version.number}${v.version.approved ? ' (approved)' : v.version.frozen ? ' (frozen)' : ' (draft)'}</small></div></div>
+      <div class="insp-facts">${[['Product', c.product], ['Marketing angle', (c.angles || []).join(' + ')], ['Creative type', c.creative_type], ['Language', c.language], ['Target duration', `${c.duration} s (timeline ${total} s)`],
+        ['Output', `${edl.timeline.aspect_ratio} · ${edl.timeline.width}×${edl.timeline.height} · ${edl.timeline.fps} fps`], ['Script', `v${c.script_version} approved`], ['Audio', `v${c.audio_version} approved${c.voiceover ? '' : ' · no voice-over'}${c.music ? '' : ' · no music'}`]].map(([k, x]) => `<div><span>${k}</span><p>${esc(x)}</p></div>`).join('')}</div>
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🧠 AI editing plan</h2><small>${esc(dir.summary || '')}</small></div></div>
+      <div class="sb-stats"><span>🎞 ${edl.tracks.video.length} clips</span><span>⏱ ${total} s</span><span>🥁 ${esc(PACE_LABEL(edl.timeline.pace))} pace</span><span>✂️ ${esc(dir.transition_strategy || 'Hard cuts')}</span><span>🖼 ${esc(dir.framing_strategy || '')}</span>${val.warnings.length ? `<span class="bad">⚠ ${val.warnings.length} warning${val.warnings.length > 1 ? 's' : ''}</span>` : ''}</div>
+      ${dir.pace_reason ? `<p class="small muted">${esc(dir.pace_reason)}${dir.opening?.note ? ` · Opening: ${esc(dir.opening.note)}` : ''}</p>` : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>▶ Video preview</h2><small>${shown ? `Render #${shown.id} · ${esc(shown.quality)} · ${shown.width}×${shown.height} · ${shown.duration.toFixed(2)} s · ${shown.fps} fps · ${vdMB(shown.size)} · made in ${shown.render_seconds.toFixed(1)} s · version v${shown.version_number}` : 'Not rendered yet'}</small></div>
+      ${shown ? `<a class="btn sm" href="/api/video-renders/${shown.id}/video?download=1">⬇ Download</a>` : ''}</div>
+      ${stale && ready.length ? `<div class="cp-warn">⚠ The timeline changed since the last render. <a data-render="preview">Render the updated preview</a></div>` : ''}
+      ${shown ? `<div class="vd-player ${edl.timeline.aspect_ratio === '16:9' ? 'wide' : ''}"><video id="vdVideo" controls preload="metadata" playsinline src="/api/video-renders/${shown.id}/video" poster="${shown.thumb_key ? `/api/video-renders/${shown.id}/thumb` : ''}"></video>
+        <div class="vd-qc"><h4>Quality check (measured)</h4>${shown.qc ? `${shown.qc.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('')}${shown.qc.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}</div>`).join('')}${!shown.qc.errors.length && !shown.qc.warnings.length ? '<div class="cp-ok">✓ Plays, right size, frame rate and length, full voice-over, no clipping.</div>' : ''}
+          ${shown.qc.measured?.loudness ? `<p class="small muted">Loudness ${shown.qc.measured.loudness.i} LUFS · peak ${shown.qc.measured.loudness.true_peak} dBTP · ${shown.qc.measured.probe?.video?.frames || '?'} frames · ${esc(shown.vcodec)}/${esc(shown.acodec || 'no audio')}</p>` : ''}` : ''}
+          <h4>Renders</h4><div class="vd-renders">${v.renders.slice(0, 8).map(r => `<button class="vd-r ${shown?.id === r.id ? 'on' : ''}" data-showr="${r.id}" ${r.status === 'ready' ? '' : 'disabled'}><b>#${r.id}</b> ${esc(r.quality)} · v${r.version_number}${r.current ? '' : ' · older'} · <i>${esc(r.status)}</i></button>`).join('')}</div></div></div>`
+        : '<p class="muted">Click “Render preview”.</p>'}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🎚 Timeline</h2><small>${total} s · click a clip to edit it · click a track to move the playhead</small></div></div>
+      <div class="vd-tl" id="vdTl">
+        <div class="vd-ruler">${Array.from({ length: Math.floor(total) + 1 }, (_, s) => (s % (total > 30 ? 5 : 2) === 0 ? `<span style="left:${pct(s)}">${s}s</span>` : '')).join('')}</div>
+        <div class="vd-track"><label>🎞 Video</label><div class="vd-lane">${edl.tracks.video.map(x => { const s = scene(x.scene_id); return `<button class="vd-clip ${x.id === state.vdClip ? 'on' : ''} ${x.locked ? 'locked' : ''} ${x.missing ? 'missing' : ''}" data-clip="${x.id}" style="left:${pct(x.timeline_start)};width:${pct(x.timeline_end - x.timeline_start)};${x.missing ? '' : `background-image:url(/media/scene/${x.scene_id}/thumb)`}" title="${esc(`${x.id} · ${SB_ROLES[x.role] || x.role} · scene ${x.scene_id} · ${(x.timeline_end - x.timeline_start).toFixed(2)} s · ${x.reason || ''}`)}"><span>${x.order}${x.transition_in?.type && x.transition_in.type !== 'hard_cut' ? ' ◐' : ''}${x.locked ? ' 🔒' : ''}</span></button>`; }).join('')}</div></div>
+        <div class="vd-track"><label>🎙 Voice</label><div class="vd-lane audio">${wave}${(vo?.segments || []).map(sg => `<span class="vd-seg" style="left:${pct(sg.start)};width:${pct(sg.end - sg.start)}" title="${esc(seg(sg.segment_id)?.text || '')}">${esc(SB_ROLES[seg(sg.segment_id)?.role] || sg.segment_id)}</span>`).join('') || '<em class="muted small">No voice-over</em>'}</div></div>
+        <div class="vd-track"><label>🎵 Music</label><div class="vd-lane audio">${edl.tracks.music ? `<span class="vd-music" style="left:0;width:100%">${esc(edl.tracks.music.name || 'Music')} · ${edl.audio.music_gain_db ? `${edl.audio.music_gain_db > 0 ? '+' : ''}${edl.audio.music_gain_db} dB` : 'approved level'}</span>` : '<em class="muted small">No music</em>'}</div></div>
+        <div class="vd-track reserved"><label>💬 Captions</label><div class="vd-lane"><em class="small muted">Module 7 (word timing ready)</em></div></div>
+        <div class="vd-track reserved"><label>✨ Effects</label><div class="vd-lane"><em class="small muted">Module 7</em></div></div>
+        <div class="vd-head" id="vdHead" style="left:0"></div>
+      </div>
+      ${clip ? vdInspector(clip, v, edit) : '<p class="small muted">Select a clip to replace it, trim it, change its length, framing, motion or transition.</p>'}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🔊 Audio mix</h2><small>${edl.audio.uses_package_mix ? 'The approved Module 5 mix is used as it is.' : 'Re-mixed from the same voice and music files (nothing regenerated).'}</small></div></div>
+      <div class="au-trim"><label>Voice level (dB) <input type="number" id="vdVoice" min="-12" max="12" step="0.5" value="${edl.audio.voice_gain_db}" ${edit && vo ? '' : 'disabled'}></label><label>Music level (dB) <input type="number" id="vdMusic" min="-12" max="12" step="0.5" value="${edl.audio.music_gain_db}" ${edit && edl.tracks.music ? '' : 'disabled'}></label>
+        <button class="btn sm" id="vdAudioSave" ${edit ? '' : 'disabled'}>Apply</button><button class="btn sm" id="vdAudioReset" ${edit ? '' : 'disabled'}>Use approved mix</button></div>
+    </section>
+
+    <details class="card sb-sec"><summary><h2>⚙️ Advanced editing settings</h2> <small class="muted">Pace and default framing for the next “Regenerate timeline”</small></summary>
+      <div class="au-trim"><label>Editing pace <select id="vdPace" ${edit ? '' : 'disabled'}><option value="">From the brief (${esc(PACE_LABEL(c.pace) || 'AI recommended')})</option>${['slow', 'balanced', 'dynamic', 'fast'].map(p => `<option value="${p}" ${v.settings?.pace === p ? 'selected' : ''}>${PACE_LABEL(p)}</option>`).join('')}</select></label>
+        <label>Default framing <select id="vdFraming" ${edit ? '' : 'disabled'}><option value="">AI decides per shot</option>${['smart_crop', 'center_crop', 'fit_background', 'product_focus'].map(f => `<option value="${f}" ${v.settings?.framing === f ? 'selected' : ''}>${VD_FRAMING[f]}</option>`).join('')}</select></label>
+        <button class="btn sm" id="vdSetSave" ${edit ? '' : 'disabled'}>Save & regenerate timeline</button><button class="btn sm" id="vdEdl">{ } View EDL</button></div>
+    </details>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🔎 Checks</h2><small>${val.errors.length ? `${val.errors.length} blocking` : 'Nothing blocking'} · ${val.warnings.length} warning${val.warnings.length === 1 ? '' : 's'} (timeline and footage)</small></div><button class="btn sm" id="vdCheck">Check again</button></div>
+      ${val.errors.map(e => `<div class="cp-err">⛔ ${esc(e.message)}</div>`).join('')}${val.warnings.map(w => `<div class="cp-warn">⚠ ${esc(w.message)}${w.clip ? ` <a data-goclip="${esc(w.clip)}">Show clip</a>` : ''}</div>`).join('')}${(dir.warnings || []).map(w => `<div class="cp-warn">🧠 ${esc(w)} <span class="small muted">(AI estimate)</span></div>`).join('')}
+      ${!val.errors.length && !val.warnings.length && !(dir.warnings || []).length ? '<div class="cp-ok">✓ Everything checks out.</div>' : ''}
+    </section>
+
+    <section class="card sb-sec"><div class="sec-h"><div><h2>🗂 Versions</h2><small>Approved versions never change; an edit after approval makes a new draft.</small></div>
+      <div class="row"><button class="btn sm" id="vdSaveV" ${edit ? '' : 'disabled'}>💾 Save version</button>${v.versions.length > 1 ? '<button class="btn sm" id="vdCmp">⇄ Compare</button>' : ''}${v.package ? '<button class="btn sm" id="vdPkg">{ } Package for Module 7</button>' : ''}</div></div>
+      <div class="au-vers">${v.versions.map(x => `<div class="au-ver ${x.id === v.version.id ? 'on' : ''}"><b>v${x.number}</b><span>${esc(x.label || '')}${x.approved ? ' ✅' : x.frozen ? ' 🧊' : ''}</span><span class="small muted">${ago(x.updated_at || x.created_at)}</span>${x.id !== v.version.id ? `<button class="btn sm" data-vrestore="${x.id}" ${edit ? '' : 'disabled'}>Restore</button>` : '<b class="ok-t">Current</b>'}</div>`).join('')}</div>
+    </section>
+
+    <div class="card au-approve"><span class="small muted">${v.version.approved ? `Approved ${ago(v.package?.approved_at)}: ready for Module 7 (captions & effects).` : 'Approve a Standard or High render of the current timeline.'}</span>
+      <div class="row">${(() => { const ok = ready.filter(r => r.current && r.quality !== 'preview' && r.qc_ok); return ok.length && !v.version.approved ? `<select id="vdApproveR">${ok.map(r => `<option value="${r.id}">#${r.id} · ${r.quality} · ${r.width}×${r.height}</option>`).join('')}</select>` : ''; })()}
+      <button class="btn primary big" id="vdApprove" ${edit && !val.errors.length && !v.version.approved && ready.some(r => r.current && r.quality !== 'preview' && r.qc_ok) ? '' : 'disabled'}>${v.version.approved ? '✅ Approved' : '✅ Approve Video Edit'}</button></div></div>`;
+  vdWire();
+  if (busy) vdPoll();
+  window.scrollTo(0, y);
+}
+const PACE_LABEL = p => ({ slow: 'Slow', balanced: 'Balanced', dynamic: 'Dynamic', fast: 'Fast', ai_recommended: 'AI recommended' }[p] || p || '');
+
+function vdInspector(x, v, edit) {
+  const s = v.scenes.find(z => z.id === x.scene_id), seg = v.context?.segments?.find(w => w.id === x.segment_id);
+  const dis = edit && !x.locked ? '' : 'disabled';
+  return `<div class="vd-insp"><div class="vd-insp-media">${x.missing ? '<div class="cp-err">Missing footage</div>' : `<img src="/media/scene/${x.scene_id}/thumb" alt="">`}</div>
+    <div class="vd-insp-body"><div class="sec-h"><div><h3>Clip ${x.order} · ${esc(SB_ROLES[x.role] || x.role)}</h3><small>Scene ${x.scene_id}${s ? ` · ${s.width}×${s.height} ${esc(s.orientation || '')} · quality ${s.quality ?? '–'}` : ''} · source ${fmtT(x.source_start)}–${fmtT(x.source_end)}${x.speed !== 1 ? ` · ${x.speed}×` : ''}${x.hold ? ` · hold ${x.hold} s` : ''} · timeline ${fmtT(x.timeline_start)}–${fmtT(x.timeline_end)}</small></div>
+      <label class="fs-tg"><input type="checkbox" id="vdLock" ${x.locked ? 'checked' : ''} ${edit ? '' : 'disabled'}> 🔒 Lock</label></div>
+      ${seg ? `<p class="small">🎙 “${esc(seg.text)}”</p>` : ''}<p class="small muted">${esc(x.reason || '')}${x.crop?.uncertain ? ' · ⚠ framing not verified' : ''}</p>
+      <div class="au-trim">
+        <button class="btn sm" id="vdReplace" ${dis}>🔁 Replace clip</button>
+        <label>Source start (s) <input type="number" id="vdTrim" step="0.05" value="${x.source_start}" ${dis}></label>
+        <label>Length (s) <input type="number" id="vdLen" step="0.1" min="0.3" value="${(x.frames / v.edl.timeline.fps).toFixed(2)}" ${dis}></label>
+        <button class="btn sm" id="vdTrimSave" ${dis}>Apply trim/length</button>
+        <button class="icon-btn sm" data-move="-1" title="Earlier (same spoken segment)" ${dis}>◀</button><button class="icon-btn sm" data-move="1" title="Later (same spoken segment)" ${dis}>▶</button>
+      </div>
+      <div class="au-trim">
+        <label>Framing <select id="vdCrop" ${dis}>${Object.entries(VD_FRAMING).map(([k, l]) => `<option value="${k}" ${x.crop?.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label>Focus left↔right <input type="range" id="vdFx" min="0" max="1" step="0.05" value="${x.crop?.x ?? 0.5}" ${dis}></label>
+        <label>Focus top↕bottom <input type="range" id="vdFy" min="0" max="1" step="0.05" value="${x.crop?.y ?? 0.5}" ${dis}></label>
+        <label>Zoom <input type="number" id="vdZoom" min="1" max="1.6" step="0.05" value="${x.crop?.zoom ?? 1}" ${dis}></label>
+        <label>Motion <select id="vdMotion" ${dis}>${Object.entries(VD_MOTION).map(([k, l]) => `<option value="${k}" ${x.motion === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label>Transition in <select id="vdTrans" ${dis}>${Object.entries(VD_TRANS).map(([k, l]) => `<option value="${k}" ${x.transition_in?.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <button class="btn sm primary" id="vdLookSave" ${dis}>Apply framing</button>
+      </div></div></div>`;
+}
+
+function vdWire() {
+  const st = state.cp, v = state.vd;
+  $('#vdSel')?.addEventListener('change', e => { state.vdSel = Number(e.target.value); cpVideo(); });
+  $('#vdGen')?.addEventListener('click', () => sbAct(async () => {
+    const r = await api(`/api/creative-projects/${st.project.id}/video/generate`, { method: 'POST', body: { au_approval_id: state.vdSel } });
+    state.vd = await api(`/api/video-edits/${r.edit_id}`); vdDraw();
+  }));
+  $('#vdCancel')?.addEventListener('click', () => sbAct(async () => { await api(`/api/video-edits/${v.edit.id}/cancel`, { method: 'POST' }); toast('Stopping…'); }));
+  $('#vdRetry')?.addEventListener('click', () => sbAct(async () => { await api(`/api/video-edits/${v.edit.id}/retry`, { method: 'POST' }); await vdReload(); }));
+  if (!v?.edl) return;
+  const id = v.edit.id;
+  document.querySelectorAll('[data-render]').forEach(b => b.onclick = () => vdJob('render', b.dataset.render));
+  $('#vdRebuild')?.addEventListener('click', () => { if (confirm('Make a new AI editing plan? Locked clips are kept; the approved script, voice-over and music do not change.')) vdJob('full', 'preview'); });
+  document.querySelectorAll('[data-showr]').forEach(b => b.onclick = () => { state.vdRender = Number(b.dataset.showr); vdDraw(); });
+  document.querySelectorAll('[data-clip]').forEach(b => b.onclick = e => { e.stopPropagation(); state.vdClip = state.vdClip === b.dataset.clip ? null : b.dataset.clip; vdDraw(); });
+  document.querySelectorAll('[data-goclip]').forEach(b => b.onclick = () => { state.vdClip = b.dataset.goclip; vdDraw(); $('#vdTl')?.scrollIntoView({ block: 'center' }); });
+  // Playhead follows the video; clicking a lane seeks.
+  const vid = $('#vdVideo'), tl = $('#vdTl'), head = $('#vdHead'), total = v.edl.timeline.duration;
+  if (vid && head) vid.ontimeupdate = () => { head.style.left = `calc(90px + (100% - 90px) * ${Math.min(1, vid.currentTime / total)})`; };
+  tl?.querySelectorAll('.vd-lane').forEach(l => l.onclick = e => { if (!vid) return; const r = l.getBoundingClientRect(); vid.currentTime = Math.max(0, Math.min(total, ((e.clientX - r.left) / r.width) * total)); });
+  const clip = v.edl.tracks.video.find(x => x.id === state.vdClip);
+  if (clip) {
+    $('#vdLock')?.addEventListener('change', e => vdPatch({ clip: { id: clip.id, locked: e.target.checked } }));
+    $('#vdReplace')?.addEventListener('click', () => sbPicker(sc => vdPatch({ clip: { id: clip.id, scene_id: sc } }), clip.scene_id, v.scenes.map(s => ({ ...s, description: `${s.used ? '● used · ' : ''}${s.description || ''}` }))));
+    $('#vdTrimSave')?.addEventListener('click', () => sbAct(async () => {
+      const len = Number($('#vdLen').value), start = Number($('#vdTrim').value);
+      if (Math.abs(start - clip.source_start) > 0.001) state.vd = await api(`/api/video-edits/${id}`, { method: 'PATCH', body: { clip: { id: clip.id, source_start: start } } });
+      if (Math.abs(len - clip.frames / v.edl.timeline.fps) > 0.02) state.vd = await api(`/api/video-edits/${id}`, { method: 'PATCH', body: { clip: { id: clip.id, duration: len } } });
+      vdDraw();
+    }));
+    document.querySelectorAll('[data-move]').forEach(b => b.onclick = () => vdPatch({ clip: { id: clip.id, move: Number(b.dataset.move) } }));
+    $('#vdLookSave')?.addEventListener('click', () => vdPatch({ clip: { id: clip.id, crop: { mode: $('#vdCrop').value, x: Number($('#vdFx').value), y: Number($('#vdFy').value), zoom: Number($('#vdZoom').value) }, motion: $('#vdMotion').value, transition: $('#vdTrans').value } }));
+  }
+  $('#vdAudioSave')?.addEventListener('click', () => vdPatch({ audio: { voice_gain_db: Number($('#vdVoice').value), music_gain_db: Number($('#vdMusic').value) } }));
+  $('#vdAudioReset')?.addEventListener('click', () => vdPatch({ audio: { reset: true } }));
+  $('#vdSetSave')?.addEventListener('click', () => sbAct(async () => { await api(`/api/video-edits/${id}`, { method: 'PATCH', body: { settings: { pace: $('#vdPace').value, framing: $('#vdFraming').value } } }); vdJob('full', 'preview'); }));
+  $('#vdEdl')?.addEventListener('click', () => sbAct(async () => sbJson(`Editing Decision List v${v.edl_version || '1.0'}`, await api(`/api/video-edits/${id}/edl`))));
+  $('#vdCheck')?.addEventListener('click', () => sbAct(async () => { state.vd = await api(`/api/video-edits/${id}/validate`, { method: 'POST' }); vdDraw(); }));
+  $('#vdSaveV')?.addEventListener('click', () => sbAct(async () => { const label = prompt('Version name (optional)', ''); if (label === null) return; state.vd = await api(`/api/video-edits/${id}/versions`, { method: 'POST', body: { label } }); vdDraw(); toast('Version saved'); }));
+  document.querySelectorAll('[data-vrestore]').forEach(b => b.onclick = () => sbAct(async () => { state.vd = await api(`/api/video-edits/${id}/versions/${b.dataset.vrestore}/restore`, { method: 'POST' }); vdDraw(); toast('Version restored as a new draft'); }));
+  $('#vdCmp')?.addEventListener('click', vdCompare);
+  $('#vdPkg')?.addEventListener('click', () => sbAct(async () => { const p = await api(`/api/video-edits/${id}/package`); sbJson(`Video edit package v${p.package.schema_version} (for Module 7)`, p.package); }));
+  $('#vdApprove')?.addEventListener('click', () => sbAct(async () => {
+    const r = await fetch(`/api/video-edits/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ render_id: Number($('#vdApproveR')?.value) }) });
+    const d = await r.json();
+    if (!r.ok) { if (d.validation) { state.vd.validation = d.validation; vdDraw(); } throw new Error(d.error); }
+    state.vd = d; vdDraw(); toast('Video edit approved: ready for captions & effects (Module 7)');
+  }));
+}
+async function vdCompare() {
+  const vs = state.vd.versions;
+  const a = prompt(`Compare which versions? Older first, e.g. "${vs[vs.length - 1].number} ${vs[0].number}"`, `${vs[Math.min(1, vs.length - 1)].number} ${vs[0].number}`);
+  if (!a) return;
+  const [x, y] = a.split(/[\s,]+/).map(Number);
+  const A = vs.find(v => v.number === x), B = vs.find(v => v.number === y);
+  if (!A || !B) return fail(new Error('Unknown version number'));
+  try {
+    const d = await api(`/api/video-edits/${state.vd.edit.id}/compare?a=${A.id}&b=${B.id}`);
+    const vid = r => r ? `<video controls preload="metadata" src="/api/video-renders/${r.id}/video"></video><small>#${r.id} · ${esc(r.quality)}</small>` : '<p class="muted small">No render</p>';
+    auModal(`<div class="sec-h"><div><h2>⇄ v${d.a} → v${d.b}</h2><small>${d.duration[0]} s → ${d.duration[1]} s</small></div><button class="btn sm" data-x>Close</button></div>
+      ${d.clips.length ? `<ul>${d.clips.map(c => `<li><b>${esc(c.id)}</b> ${c.change}${c.fields ? ` (${c.fields.join(', ')})` : ''}${c.before ? ` · scene ${c.before}` : ''}${c.after && c.after !== c.before ? ` → ${c.after}` : ''}</li>`).join('')}</ul>` : '<p class="muted">Same clips.</p>'}
+      ${d.audio ? `<p>Audio levels: ${esc(JSON.stringify(d.audio.before))} → ${esc(JSON.stringify(d.audio.after))}</p>` : ''}
+      <div class="vd-cmp"><div><b>v${d.a}</b>${vid(d.renders[0][0])}</div><div><b>v${d.b}</b>${vid(d.renders[1][0])}</div></div>`, 1000);
   } catch (e) { fail(e); }
 }
 

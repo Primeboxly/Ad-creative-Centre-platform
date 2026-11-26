@@ -98,6 +98,7 @@ const FFPROBE = process.env.FFPROBE_PATH || (existsSync('/usr/bin/ffprobe') ? '/
   : await import('ffprobe-static').then(m => m.default?.path || '').catch(() => ''));
 export const ffprobeReady = () => Boolean(FFPROBE);
 export const ffprobePath = () => FFPROBE;
+export const ffmpegBin = () => FFMPEG;
 
 // How many audio and video streams a file has, read by ffprobe.
 export function streamCounts(file, ctx) {
